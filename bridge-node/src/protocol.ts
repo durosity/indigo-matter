@@ -129,6 +129,13 @@ export const Role = {
     pressureSensor: "pressureSensor",
     flowSensor: "flowSensor",
     thermostat: "thermostat",
+    /**
+     * Robotic Vacuum Cleaner (0x0074). The only **standalone** role (ADR-0019):
+     * it is never built under the aggregator, because Apple Home and Alexa do
+     * not support a bridged vacuum. The node hosts each one as its own
+     * commissionable Matter node — see `standalone.ts` and §3.12.
+     */
+    roboticVacuumCleaner: "roboticVacuumCleaner",
 } as const;
 
 export type RoleValue = (typeof Role)[keyof typeof Role];
@@ -521,6 +528,14 @@ export interface StatusReport {
      * precedent `subscriptionChurn` set.
      */
     sessionHygiene: SessionHygiene;
+    /**
+     * ADR-0019 — the standalone accessories (one Matter node each). Additive
+     * with no `protocolVersion` bump, the `subscriptionChurn` precedent: a
+     * client that does not know the field ignores it, and one that does must
+     * read its absence (an older node) as `[]`. Never counted in
+     * `endpointCount`/`endpoints`, which describe the bridge's aggregator.
+     */
+    standalone: StandaloneSummary[];
 }
 
 export interface EndpointSummary {
@@ -625,6 +640,59 @@ export interface BridgeFacade {
     factoryReset(preserveEndpointNumbers: boolean): Promise<void>;
     /** §3.11 — adopt the live endpoint numbers as the new persisted map. */
     rebuildEndpointMap(): Promise<StatusReport>;
+    /** §3.12 — a standalone accessory's own pairing state (`get_standalone_pairing`). */
+    getStandalonePairing(indigoDeviceId: number): Promise<PairingReport>;
+    /** §3.12 — open an enhanced window on a standalone accessory's own node. */
+    openStandaloneWindow(indigoDeviceId: number, durationSeconds: number): Promise<CommissioningWindowResult>;
+    /**
+     * §3.12 — unpair a standalone accessory from every ecosystem and advertise
+     * it afresh under new codes. The answer is the fresh pairing state.
+     */
+    resetStandalone(indigoDeviceId: number): Promise<PairingReport>;
+}
+
+/**
+ * ADR-0019 — roles that are published as their own Matter node (one per
+ * export, own commissioning, own fabrics) instead of as a bridged child.
+ * Kept here, matter.js-free, so the reconcile partition in `node.ts` and the
+ * wire tests can share it.
+ */
+export const STANDALONE_ROLES: ReadonlySet<RoleValue> = new Set<RoleValue>([Role.roboticVacuumCleaner]);
+
+export function isStandaloneRole(role: RoleValue): boolean {
+    return STANDALONE_ROLES.has(role);
+}
+
+/**
+ * §4.2 `roboticVacuumCleaner` — the `operationalState` domain, in the order the
+ * node advertises it. The node owns the mapping to RVC Operational State's
+ * integer enum and derives RVC Run Mode from it (running/paused → Cleaning,
+ * everything else → Idle), the same way `smokeAlarm` derives `expressedState`:
+ * Indigo carries one reading, and the two attributes must agree.
+ */
+export const RVC_OPERATIONAL_STATES = [
+    "stopped",
+    "running",
+    "paused",
+    "error",
+    "seekingCharger",
+    "charging",
+    "docked",
+] as const;
+
+export type RvcOperationalStateValue = (typeof RVC_OPERATIONAL_STATES)[number];
+
+/** §4.3 `standalone[]` — one standalone accessory's own node, as `get_status` reports it. */
+export interface StandaloneSummary {
+    indigoDeviceId: number;
+    role: RoleValue;
+    publishedAs: string;
+    /** The UDP port this accessory's own Matter node listens on. */
+    port: number;
+    /** Whether the node is online (it can fail to bind, independently of the bridge). */
+    online: boolean;
+    commissioned: boolean;
+    fabrics: FabricInfo[];
 }
 
 /** A protocol-level failure a command handler can throw to shape its response. */

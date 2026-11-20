@@ -403,15 +403,26 @@ describe("the whole §4.2 role table, from the golden frames", () => {
             const expected = golden.attach_all_roles.response.result as {
                 endpointCount: number;
                 endpoints: { indigoDeviceId: number; role: string }[];
+                standalone: { indigoDeviceId: number; role: string }[];
             };
             const attached = await client.request(request);
             assert.equal(attached.error_code, undefined, `attach failed: ${JSON.stringify(attached)}`);
-            const status = attached.result as { endpointCount: number; endpoints: { indigoDeviceId: number; role: string }[] };
+            const status = attached.result as {
+                endpointCount: number;
+                endpoints: { indigoDeviceId: number; role: string }[];
+                standalone: { indigoDeviceId: number; role: string; online: boolean }[];
+            };
 
             assert.equal(status.endpointCount, expected.endpointCount);
             assert.deepEqual(
                 status.endpoints.map(endpoint => [endpoint.indigoDeviceId, endpoint.role]),
                 expected.endpoints.map(endpoint => [endpoint.indigoDeviceId, endpoint.role]),
+            );
+            // ADR-0019 — the standalone role is in the attach but lands on its
+            // own node: under `standalone`, online, never among `endpoints`.
+            assert.deepEqual(
+                status.standalone.map(entry => [entry.indigoDeviceId, entry.role, entry.online]),
+                expected.standalone.map(entry => [entry.indigoDeviceId, entry.role, true]),
             );
 
             // Every per-role set_state frame, verbatim, against the endpoints
@@ -424,7 +435,10 @@ describe("the whole §4.2 role table, from the golden frames", () => {
 
             for (const [name, exchange] of frames) {
                 const args = exchange.request.args as { indigoDeviceId: number };
-                if (!expected.endpoints.some(endpoint => endpoint.indigoDeviceId === args.indigoDeviceId)) {
+                if (
+                    !expected.endpoints.some(endpoint => endpoint.indigoDeviceId === args.indigoDeviceId) &&
+                    !expected.standalone.some(entry => entry.indigoDeviceId === args.indigoDeviceId)
+                ) {
                     continue; // the plain `set_state` frame targets another fixture's device
                 }
                 assert.deepEqual(await client.request(exchange.request), exchange.response, name);

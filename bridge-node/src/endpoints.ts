@@ -44,12 +44,17 @@ import { LevelControlServer } from "@matter/main/behaviors/level-control";
 import { OccupancySensingServer } from "@matter/main/behaviors/occupancy-sensing";
 import { OnOffServer } from "@matter/main/behaviors/on-off";
 import { PowerSourceServer } from "@matter/main/behaviors/power-source";
+import { RvcOperationalStateServer } from "@matter/main/behaviors/rvc-operational-state";
+import { RvcRunModeServer } from "@matter/main/behaviors/rvc-run-mode";
 import { SmokeCoAlarmServer } from "@matter/main/behaviors/smoke-co-alarm";
 import { ThermostatServer } from "@matter/main/behaviors/thermostat";
 import { MovementDirection, MovementType, WindowCoveringServer } from "@matter/main/behaviors/window-covering";
 import { ColorControl } from "@matter/main/clusters/color-control";
 import { DoorLock } from "@matter/main/clusters/door-lock";
 import { LevelControl } from "@matter/main/clusters/level-control";
+import { ModeBase } from "@matter/main/clusters/mode-base";
+import { RvcOperationalState } from "@matter/main/clusters/rvc-operational-state";
+import { RvcRunMode } from "@matter/main/clusters/rvc-run-mode";
 import { SmokeCoAlarm } from "@matter/main/clusters/smoke-co-alarm";
 import { Thermostat } from "@matter/main/clusters/thermostat";
 import { ColorTemperatureLightDevice } from "@matter/main/devices/color-temperature-light";
@@ -68,6 +73,7 @@ import { OccupancySensorDevice } from "@matter/main/devices/occupancy-sensor";
 import { OnOffLightDevice } from "@matter/main/devices/on-off-light";
 import { OnOffPlugInUnitDevice } from "@matter/main/devices/on-off-plug-in-unit";
 import { PressureSensorDevice } from "@matter/main/devices/pressure-sensor";
+import { RoboticVacuumCleanerDevice } from "@matter/main/devices/robotic-vacuum-cleaner";
 import { TemperatureSensorDevice } from "@matter/main/devices/temperature-sensor";
 import { ThermostatDevice } from "@matter/main/devices/thermostat";
 import { WindowCoveringDevice } from "@matter/main/devices/window-covering";
@@ -83,6 +89,8 @@ import {
     publishedIdFor,
     Role,
     type RoleValue,
+    RVC_OPERATIONAL_STATES,
+    type RvcOperationalStateValue,
 } from "./protocol.js";
 
 /**
@@ -575,6 +583,8 @@ const FLOW_MEASUREMENT = "flowMeasurement";
 const THERMOSTAT = "thermostat";
 const DOOR_LOCK = "doorLock";
 const WINDOW_COVERING = "windowCovering";
+const RVC_RUN_MODE = "rvcRunMode";
+const RVC_OPERATIONAL_STATE = "rvcOperationalState";
 /** Issue #220 — PowerSource, added optionally per §4.1's `battery` flag. */
 const POWER_SOURCE = "powerSource";
 
@@ -1382,6 +1392,146 @@ class IndigoWindowCoveringServer extends WindowCoveringServer.with("Lift", "Posi
  * this bridge does not enable but which a future `.with()` change could. They
  * are unambiguous ends of travel, so they map to 100 and 0 directly.
  */
+// ---------------------------------------------------------------------------
+// Robotic Vacuum Cleaner (ADR-0019) — always a standalone node, never bridged
+// ---------------------------------------------------------------------------
+
+/** RVC Run Mode's two advertised modes. Numbers are ours; the tags are what ecosystems read. */
+export const RVC_MODE_IDLE = 0;
+export const RVC_MODE_CLEANING = 1;
+
+const RVC_SUPPORTED_MODES = [
+    { label: "Idle", mode: RVC_MODE_IDLE, modeTags: [{ value: RvcRunMode.ModeTag.Idle }] },
+    { label: "Cleaning", mode: RVC_MODE_CLEANING, modeTags: [{ value: RvcRunMode.ModeTag.Cleaning }] },
+];
+
+const RVC_STATE_TO_MATTER: Record<RvcOperationalStateValue, RvcOperationalState.OperationalState> = {
+    stopped: RvcOperationalState.OperationalState.Stopped,
+    running: RvcOperationalState.OperationalState.Running,
+    paused: RvcOperationalState.OperationalState.Paused,
+    error: RvcOperationalState.OperationalState.Error,
+    seekingCharger: RvcOperationalState.OperationalState.SeekingCharger,
+    charging: RvcOperationalState.OperationalState.Charging,
+    docked: RvcOperationalState.OperationalState.Docked,
+};
+
+/** §4.2 `operationalState` → the Matter enum, or `undefined` outside the domain. */
+export function rvcStateToMatter(value: unknown): RvcOperationalState.OperationalState | undefined {
+    return typeof value === "string" && Object.prototype.hasOwnProperty.call(RVC_STATE_TO_MATTER, value)
+        ? RVC_STATE_TO_MATTER[value as RvcOperationalStateValue]
+        : undefined;
+}
+
+/**
+ * The run mode an operational state implies. Matter's RVC model keeps the two
+ * in separate clusters, but they describe one fact: a vacuum that is running
+ * or paused mid-clean is in a Cleaning mode, and one that is docked, charging,
+ * stopped, heading home or faulted is Idle. Derived here rather than sent by
+ * the plugin for the same reason `smokeAlarm` derives `expressedState`.
+ */
+export function rvcRunModeFor(state: RvcOperationalStateValue): number {
+    return state === "running" || state === "paused" ? RVC_MODE_CLEANING : RVC_MODE_IDLE;
+}
+
+/**
+ * A successful RVC Operational State command response. Returned only once the
+ * invocation has been handed to the plugin — it says "accepted", never "done";
+ * `operationalState` still moves only on the plugin's `set_state`.
+ */
+const RVC_ACCEPTED = { commandResponseState: { errorStateId: RvcOperationalState.ErrorState.NoError } };
+
+/**
+ * RVC Run Mode, with the auto-confirmation removed.
+ *
+ * Stock `changeToMode` validates the target and writes `currentMode` on the
+ * spot — the ecosystem would show the vacuum cleaning the instant it asked.
+ * PRD §7's never-auto-confirm applies exactly as it does to a lock: the mode
+ * follows the plugin's `set_state`, derived from `operationalState`.
+ *
+ * Cleaning → §4.2 `start`, Idle → `stop`. Matter's own spec says a change to
+ * Idle stops the vacuum where it is; it does not send it home — that is
+ * `goHome`, on the other cluster.
+ *
+ * `failWithoutSink` is set for the same reason as the lock's: an ecosystem
+ * told "the vacuum started" while the plugin was away would be lying about a
+ * physical machine, and failing the invocation is the only way to say so.
+ */
+class IndigoRvcRunModeServer extends RvcRunModeServer {
+    override changeToMode({ newMode }: ModeBase.ChangeToModeRequest): MaybePromise<ModeBase.ChangeToModeResponse> {
+        if (newMode === RVC_MODE_CLEANING) {
+            emitCommand(this.endpoint.id, "start", {}, true);
+        } else if (newMode === RVC_MODE_IDLE) {
+            emitCommand(this.endpoint.id, "stop", {}, true);
+        } else {
+            return { status: ModeBase.ModeChangeStatus.UnsupportedMode, statusText: `Unsupported mode ${newMode}` };
+        }
+        return { status: ModeBase.ModeChangeStatus.Success, statusText: "" };
+    }
+}
+
+/**
+ * RVC Operational State, answering `pause`/`resume`/`goHome` with a `command`.
+ *
+ * The stock server implements none of the three (matter.js leaves them to the
+ * device), so this adds them rather than replacing anything — and, like every
+ * other invocation-driven role here, none of them writes `operationalState`.
+ */
+class IndigoRvcOperationalStateServer extends RvcOperationalStateServer {
+    override pause(): MaybePromise<RvcOperationalState.OperationalCommandResponse> {
+        emitCommand(this.endpoint.id, "pause", {}, true);
+        return RVC_ACCEPTED;
+    }
+
+    override resume(): MaybePromise<RvcOperationalState.OperationalCommandResponse> {
+        emitCommand(this.endpoint.id, "resume", {}, true);
+        return RVC_ACCEPTED;
+    }
+
+    override goHome(): MaybePromise<RvcOperationalState.OperationalCommandResponse> {
+        emitCommand(this.endpoint.id, "goHome", {}, true);
+        return RVC_ACCEPTED;
+    }
+}
+
+function rvcDefaults(): Record<string, unknown> {
+    return {
+        [RVC_RUN_MODE]: { supportedModes: RVC_SUPPORTED_MODES, currentMode: RVC_MODE_IDLE },
+        [RVC_OPERATIONAL_STATE]: {
+            // Every state §4.2 can push must be listed, or matter.js refuses the
+            // write (`#assertOperationalState`); Error is mandatory regardless.
+            operationalStateList: RVC_OPERATIONAL_STATES.map(state => ({
+                operationalStateId: RVC_STATE_TO_MATTER[state],
+            })),
+            operationalState: RvcOperationalState.OperationalState.Stopped,
+            operationalError: { errorStateId: RvcOperationalState.ErrorState.NoError },
+            phaseList: null,
+            currentPhase: null,
+        },
+    };
+}
+
+function rvcPatch(states: Record<string, unknown>): Record<string, unknown> {
+    const matter = rvcStateToMatter(states.operationalState);
+    if (matter === undefined) {
+        return {};
+    }
+    const state = states.operationalState as RvcOperationalStateValue;
+    return {
+        [RVC_OPERATIONAL_STATE]: {
+            operationalState: matter,
+            // Indigo has one generic "it is in trouble", not Matter's taxonomy,
+            // so an error is the generic UnableToCompleteOperation; leaving
+            // Error clears it (the stock server also does this on the way out).
+            operationalError: {
+                errorStateId: state === "error"
+                    ? RvcOperationalState.ErrorState.UnableToCompleteOperation
+                    : RvcOperationalState.ErrorState.NoError,
+            },
+        },
+        [RVC_RUN_MODE]: { currentMode: rvcRunModeFor(state) },
+    };
+}
+
 function movementPosition(direction: MovementDirection, targetPercent100ths?: number): number {
     if (typeof targetPercent100ths === "number") {
         return percent100thsToPosition(targetPercent100ths);
@@ -1692,6 +1842,12 @@ interface RoleDefinition {
      * state patches are keyed by behaviour id, which is untyped either way.
      */
     deviceType: () => EndpointType;
+    /**
+     * ADR-0019 — published as its own Matter node, so the device type carries
+     * NO Bridged Device Basic Information: its name and reachability live on
+     * the standalone node's root Basic Information instead (`standalone.ts`).
+     */
+    standalone?: true;
 }
 
 /** One observable to subscribe: a behaviour id, an attribute, and its command. */
@@ -2388,6 +2544,16 @@ const ROLE_DEFINITIONS: Record<RoleValue, RoleDefinition> = {
         // our own `set_state`, because handleMovement no longer writes them.
         watch: [],
     },
+    [Role.roboticVacuumCleaner]: {
+        deviceType: () =>
+            RoboticVacuumCleanerDevice.with(IndigoRvcRunModeServer, IndigoRvcOperationalStateServer),
+        initialState: rvcDefaults,
+        statePatch: rvcPatch,
+        // Invocation-driven, like doorLock: neither attribute is ever written
+        // by an ecosystem, so there is nothing to watch.
+        watch: [],
+        standalone: true,
+    },
 };
 
 /**
@@ -2623,7 +2789,7 @@ export function createEndpoint(spec: EndpointSpec, identity: BridgedIdentity): E
     return new Endpoint(deviceTypeFor(definition, spec.battery) as never, {
         id: spec.publishedAs,
         ...mergeBehaviors(
-            { [BRIDGED_INFO]: bridgedInfoFor(spec, identity) },
+            definition.standalone ? {} : { [BRIDGED_INFO]: bridgedInfoFor(spec, identity) },
             initialState,
             // `BATTERY_INITIAL` seeds `batPercentRemaining: null` even when
             // `battery` is undefined (no `batteryLevel` in the initial

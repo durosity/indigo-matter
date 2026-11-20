@@ -53,6 +53,7 @@ import {
     type CommandEventData,
     type EndpointSpec,
     ErrorCode,
+    isStandaloneRole,
     ProtocolError,
     Role,
     type RoleValue,
@@ -5015,7 +5016,10 @@ describe("PowerSource / battery (issue #220)", () => {
     it("applies a batteryLevel-only set_state on a battery endpoint of every role, no refusal", async () => {
         const h = await harness();
         try {
-            const roles = Object.values(Role) as RoleValue[];
+            // Every BRIDGED role: a standalone one (ADR-0019) is refused by the
+            // registry by design, and its battery path is pinned in
+            // standalone.test.ts against its own node.
+            const roles = (Object.values(Role) as RoleValue[]).filter(role => !isStandaloneRole(role));
             await h.registry.reconcile(
                 roles.map((role, index) => spec(920_000 + index, role, { battery: true })),
                 false,

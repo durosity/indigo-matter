@@ -41,7 +41,14 @@
     "",
     "'command_unexported_device' targets an indigoDeviceId in no endpoint set, for",
     "the path where the allow-list no longer contains the device an ecosystem just",
-    "acted on (§5 / PRD §7 race row): no action, one warning."
+    "acted on (§5 / PRD §7 race row): no action, one warning.",
+    "",
+    "ADR-0019 / §3.12 — the standalone family. 'roboticVacuumCleaner' (900021) is the",
+    "only standalone role: in 'attach_all_roles' it appears in the request like any",
+    "other spec but in the response under 'standalone', never in 'endpoints' or",
+    "'endpointCount', because it is its own Matter node, not an aggregator child.",
+    "Its pairing family names the accessory by indigoDeviceId and answers with the",
+    "same PairingReport/CommissioningWindowResult shapes as §3.7/§3.8."
   ],
   "handshake": {
     "protocolVersion": 2,
@@ -81,7 +88,8 @@
             "dead": 0,
             "rotated": 0
           }
-        }
+        },
+        "standalone": []
       }
     }
   },
@@ -173,7 +181,8 @@
             "dead": 0,
             "rotated": 0
           }
-        }
+        },
+        "standalone": []
       }
     }
   },
@@ -247,7 +256,8 @@
             "dead": 0,
             "rotated": 0
           }
-        }
+        },
+        "standalone": []
       }
     }
   },
@@ -450,7 +460,8 @@
             "dead": 0,
             "rotated": 0
           }
-        }
+        },
+        "standalone": []
       }
     }
   },
@@ -494,7 +505,8 @@
             "dead": 0,
             "rotated": 0
           }
-        }
+        },
+        "standalone": []
       }
     }
   },
@@ -1095,6 +1107,16 @@
               "co": false
             },
             "options": {}
+          },
+          {
+            "indigoDeviceId": 900021,
+            "role": "roboticVacuumCleaner",
+            "label": "Hallway Vacuum",
+            "reachable": true,
+            "states": {
+              "operationalState": "docked"
+            },
+            "options": {}
           }
         ]
       }
@@ -1249,7 +1271,18 @@
             "dead": 0,
             "rotated": 0
           }
-        }
+        },
+        "standalone": [
+          {
+            "indigoDeviceId": 900021,
+            "role": "roboticVacuumCleaner",
+            "publishedAs": "indigo-900021",
+            "port": 5541,
+            "online": true,
+            "commissioned": false,
+            "fabrics": []
+          }
+        ]
       }
     }
   },
@@ -1611,7 +1644,8 @@
             "dead": 0,
             "rotated": 0
           }
-        }
+        },
+        "standalone": []
       }
     }
   },
@@ -1730,6 +1764,203 @@
     "response": {
       "message_id": "m77",
       "result": {}
+    }
+  },
+  "get_status_standalone": {
+    "request": {
+      "message_id": "m90",
+      "command": "get_status",
+      "args": {}
+    },
+    "response": {
+      "message_id": "m90",
+      "result": {
+        "commissioned": true,
+        "fabrics": [
+          {
+            "fabricIndex": 1,
+            "label": "Apple Home",
+            "vendorId": 4937
+          }
+        ],
+        "endpointCount": 2,
+        "endpoints": [
+          {
+            "indigoDeviceId": 123456789,
+            "endpointNumber": 2,
+            "publishedAs": "indigo-123456789",
+            "role": "onOffLight"
+          },
+          {
+            "indigoDeviceId": 123456790,
+            "endpointNumber": 3,
+            "publishedAs": "indigo-123456790",
+            "role": "dimmableLight"
+          }
+        ],
+        "drift": [],
+        "driftChecked": false,
+        "warnings": [],
+        "subscriptionChurn": {
+          "checked": true,
+          "active": false,
+          "peers": []
+        },
+        "sessionHygiene": {
+          "checked": true,
+          "peers": [],
+          "closed": {
+            "superseded": 0,
+            "dead": 0,
+            "rotated": 0
+          }
+        },
+        "standalone": [
+          {
+            "indigoDeviceId": 900021,
+            "role": "roboticVacuumCleaner",
+            "publishedAs": "indigo-900021",
+            "port": 5541,
+            "online": true,
+            "commissioned": true,
+            "fabrics": [
+              {
+                "fabricIndex": 1,
+                "label": "Apple Home",
+                "vendorId": 4937
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "set_state_robotic_vacuum_cleaner": {
+    "request": {
+      "message_id": "m91",
+      "command": "set_state",
+      "args": {
+        "indigoDeviceId": 900021,
+        "states": {
+          "operationalState": "running"
+        }
+      }
+    },
+    "response": {
+      "message_id": "m91",
+      "result": {}
+    }
+  },
+  "get_standalone_pairing": {
+    "request": {
+      "message_id": "m92",
+      "command": "get_standalone_pairing",
+      "args": {
+        "indigoDeviceId": 900021
+      }
+    },
+    "response": {
+      "message_id": "m92",
+      "result": {
+        "commissioned": false,
+        "windowOpen": true,
+        "windowExpiresAt": null,
+        "manualPairingCode": "34970112332",
+        "qrPairingCode": "MT:-24J0AFN00KA0648G00",
+        "fabrics": []
+      }
+    }
+  },
+  "open_standalone_window": {
+    "request": {
+      "message_id": "m93",
+      "command": "open_standalone_window",
+      "args": {
+        "indigoDeviceId": 900021,
+        "durationSeconds": 900
+      }
+    },
+    "response": {
+      "message_id": "m93",
+      "result": {
+        "manualPairingCode": "34970112332",
+        "qrPairingCode": "MT:-24J0AFN00KA0648G00",
+        "windowExpiresAt": "2026-08-04T12:15:00.000Z"
+      }
+    }
+  },
+  "reset_standalone": {
+    "request": {
+      "message_id": "m94",
+      "command": "reset_standalone",
+      "args": {
+        "indigoDeviceId": 900021
+      }
+    },
+    "response": {
+      "message_id": "m94",
+      "result": {
+        "commissioned": false,
+        "windowOpen": true,
+        "windowExpiresAt": null,
+        "manualPairingCode": "34970112332",
+        "qrPairingCode": "MT:-24J0AFN00KA0648G00",
+        "fabrics": []
+      }
+    }
+  },
+  "standalone_pairing_unknown_device": {
+    "request": {
+      "message_id": "m95",
+      "command": "get_standalone_pairing",
+      "args": {
+        "indigoDeviceId": 424242
+      }
+    },
+    "response": {
+      "message_id": "m95",
+      "error_code": "unknown_device",
+      "details": "no standalone accessory for device 424242"
+    }
+  },
+  "command_start": {
+    "event": "command",
+    "data": {
+      "indigoDeviceId": 900021,
+      "command": "start",
+      "args": {}
+    }
+  },
+  "command_stop": {
+    "event": "command",
+    "data": {
+      "indigoDeviceId": 900021,
+      "command": "stop",
+      "args": {}
+    }
+  },
+  "command_pause": {
+    "event": "command",
+    "data": {
+      "indigoDeviceId": 900021,
+      "command": "pause",
+      "args": {}
+    }
+  },
+  "command_resume": {
+    "event": "command",
+    "data": {
+      "indigoDeviceId": 900021,
+      "command": "resume",
+      "args": {}
+    }
+  },
+  "command_go_home": {
+    "event": "command",
+    "data": {
+      "indigoDeviceId": 900021,
+      "command": "goHome",
+      "args": {}
     }
   }
 }

@@ -60,6 +60,8 @@ import {
     describeErrorWithStack,
     type DriftEntry,
     endpointMapInvalidDetails,
+    INTENT_REPLACE_ALL,
+    isStandaloneRole,
     type EndpointSpec,
     ErrorCode,
     type FabricInfo,
@@ -77,6 +79,7 @@ import {
     type WindowClosedReason,
 } from "./protocol.js";
 import { EndpointRegistry } from "./registry.js";
+import { StandaloneHost } from "./standalone.js";
 import {
     type HygieneClosure,
     peerSessionCounts,
@@ -245,6 +248,8 @@ export { matterJsVersion };
 export class BridgeNode implements BridgeFacade {
     #server?: ServerNode;
     #registry?: EndpointRegistry;
+    /** ADR-0019 — exports published as their own Matter node (the vacuum). */
+    #standalone?: StandaloneHost;
     #command?: (data: CommandEventData) => void;
     #driftListener?: (drift: DriftEntry[]) => void;
     #fabricsListener?: (fabrics: FabricInfo[], change: string) => void;
@@ -468,6 +473,15 @@ export class BridgeNode implements BridgeFacade {
             onConfigurationChange: () => this.bumpConfigurationVersion(),
         });
 
+        this.#standalone = new StandaloneHost({
+            storagePath: this.config.storagePath,
+            environment,
+            bridgePort: this.config.matterPort,
+            identity: this.bridgedIdentity,
+            log: message => this.log(message),
+            emit: data => this.#command?.(data),
+        });
+
         server.events.commissioning.fabricsChanged.on((fabricIndex, action) => {
             // A throw here propagates straight into matter.js's observable, and
             // `fabrics()` reads server state that is legitimately gone once
@@ -514,6 +528,18 @@ export class BridgeNode implements BridgeFacade {
 
         this.log(`Matter node online on port ${this.config.matterPort}, storage ${this.config.storagePath}`);
         this.logPairing();
+
+        // ADR-0019 — standalone accessories come back after the bridge, each on
+        // its own node. Independent of the bridge's own refusal state: a
+        // standalone node has no aggregator numbering for the endpoint map to
+        // vouch for. `restore()` never throws per accessory; this catch is for
+        // the host itself.
+        try {
+            this.#standalone.load();
+            await this.#standalone.restore();
+        } catch (error) {
+            this.log(`Standalone accessories could not be restored: ${describeErrorWithStack(error)}`);
+        }
     }
 
     /**
@@ -1388,9 +1414,14 @@ export class BridgeNode implements BridgeFacade {
             // would re-emit `drift_detected` every 15s for one unchanged fault.
             drift: [...this.#drift],
             driftChecked: this.#endpointMap.checked,
-            warnings: [...this.#warnings.values(), ...this.#endpointMap.warnings],
+            warnings: [
+                ...this.#warnings.values(),
+                ...this.#endpointMap.warnings,
+                ...(this.#standalone?.warnings ?? []),
+            ],
             subscriptionChurn,
             sessionHygiene,
+            standalone: this.#standalone?.summaries() ?? [],
         };
     }
 
@@ -1625,9 +1656,26 @@ export class BridgeNode implements BridgeFacade {
 
     /** §3.1 — reconcile the live endpoint set, then answer with the new status. */
     async reconcile(endpoints: readonly EndpointSpec[], replaceAll: boolean): Promise<StatusReport> {
+        // ADR-0019 — partition. A standalone role never reaches the registry.
+        const standalone = endpoints.filter(spec => isStandaloneRole(spec.role));
+        const bridged = endpoints.filter(spec => !isStandaloneRole(spec.role));
+        // The §3.1 mass-removal guard, decided once for the WHOLE attach. The
+        // registry's own guard sees only the bridged half, so without this an
+        // attach carrying just a vacuum (say, the user's only bridged export
+        // became the vacuum) would be refused as "remove everything" — when
+        // the attach is demonstrably not empty. An attach that IS empty still
+        // needs the intent, whichever side its live accessories are on.
+        const liveTotal = this.registry.size + (this.#standalone?.activeCount() ?? 0);
+        if (endpoints.length === 0 && liveTotal > 0 && !replaceAll) {
+            throw new ProtocolError(
+                ErrorCode.massRemovalRefused,
+                `attach would remove all ${liveTotal} live endpoints without intent: ${INTENT_REPLACE_ALL}`,
+            );
+        }
         const before = this.livePublishedIdentities();
         try {
-            await this.registry.reconcile(endpoints, replaceAll);
+            await this.registry.reconcile(bridged, replaceAll || standalone.length > 0);
+            await this.standaloneHost.reconcile(standalone);
         } finally {
             // Before the drift check, so a recreate — which is a remove and a
             // create in one plan — has its role and label put straight back by
@@ -1653,6 +1701,25 @@ export class BridgeNode implements BridgeFacade {
      * live-identity-move refusal) must still propagate unchanged.
      */
     async upsertEndpoint(spec: EndpointSpec): Promise<UpsertResult> {
+        if (isStandaloneRole(spec.role)) {
+            // A device moving FROM a bridged role leaves a bridged endpoint
+            // behind; it is superseded, so it goes now rather than at the next
+            // attach. Soft, like an attach's own un-export (forgetRemoved).
+            if (this.registry.identities().some(identity => identity.indigoDeviceId === spec.indigoDeviceId)) {
+                const before = this.livePublishedIdentities();
+                try {
+                    await this.registry.remove(spec.indigoDeviceId);
+                } finally {
+                    this.forgetRemoved(before);
+                    this.checkDrift();
+                }
+            }
+            return this.standaloneHost.upsert(spec);
+        }
+        if (this.#standalone?.owns(spec.indigoDeviceId)) {
+            // …and the reverse: a vacuum re-exported as something bridged.
+            await this.#standalone.remove(spec.indigoDeviceId);
+        }
         let result: UpsertResult;
         try {
             result = await this.registry.upsert(spec);
@@ -1679,6 +1746,9 @@ export class BridgeNode implements BridgeFacade {
      * upsert happened to notice.
      */
     async removeEndpoint(indigoDeviceId: number): Promise<RemoveResult> {
+        if (this.#standalone?.owns(indigoDeviceId)) {
+            return this.#standalone.remove(indigoDeviceId);
+        }
         const before = this.livePublishedIdentities();
         try {
             return await this.registry.remove(indigoDeviceId);
@@ -1690,12 +1760,40 @@ export class BridgeNode implements BridgeFacade {
 
     /** §3.4 */
     async setState(indigoDeviceId: number, states: Record<string, unknown>): Promise<void> {
+        if (this.#standalone?.has(indigoDeviceId)) {
+            return this.#standalone.setState(indigoDeviceId, states);
+        }
         await this.registry.setState(indigoDeviceId, states);
     }
 
-    /** §3.5 */
+    /** §3.5 — for a standalone accessory, its root Basic Information `Reachable`. */
     async setReachable(indigoDeviceId: number, reachable: boolean): Promise<void> {
+        if (this.#standalone?.has(indigoDeviceId)) {
+            return this.#standalone.setReachable(indigoDeviceId, reachable);
+        }
         await this.registry.setReachable(indigoDeviceId, reachable);
+    }
+
+    private get standaloneHost(): StandaloneHost {
+        if (this.#standalone === undefined) {
+            throw new ProtocolError(ErrorCode.internal, "Matter node not started");
+        }
+        return this.#standalone;
+    }
+
+    /** §3.12 */
+    async getStandalonePairing(indigoDeviceId: number): Promise<PairingReport> {
+        return this.standaloneHost.pairing(indigoDeviceId);
+    }
+
+    /** §3.12 */
+    async openStandaloneWindow(indigoDeviceId: number, durationSeconds: number): Promise<CommissioningWindowResult> {
+        return this.standaloneHost.openWindow(indigoDeviceId, durationSeconds);
+    }
+
+    /** §3.12 */
+    async resetStandalone(indigoDeviceId: number): Promise<PairingReport> {
+        return this.standaloneHost.reset(indigoDeviceId);
     }
 
     /**
@@ -2170,6 +2268,11 @@ export class BridgeNode implements BridgeFacade {
 
     async close(): Promise<void> {
         this.#window.clear();
+        const standalone = this.#standalone;
+        this.#standalone = undefined;
+        if (standalone !== undefined) {
+            await standalone.close().catch(error => this.log(`Closing standalone nodes failed: ${describeError(error)}`));
+        }
         const server = this.#server;
         this.#server = undefined;
         this.#registry?.close();

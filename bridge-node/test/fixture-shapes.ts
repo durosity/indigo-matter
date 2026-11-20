@@ -84,6 +84,7 @@ export const status = {
     warnings: [],
     subscriptionChurn: CHURN_HEALTHY,
     sessionHygiene: HYGIENE_HEALTHY,
+    standalone: [],
 } satisfies StatusReport;
 
 /**
@@ -101,6 +102,7 @@ export const statusEmpty = {
     warnings: [],
     subscriptionChurn: CHURN_HEALTHY,
     sessionHygiene: HYGIENE_HEALTHY,
+    standalone: [],
 } satisfies StatusReport;
 
 /** §3.1 with `intent: "replace_all"`: the live set is emptied deliberately. */
@@ -114,6 +116,7 @@ export const statusReplaceAll = {
     warnings: [],
     subscriptionChurn: CHURN_HEALTHY,
     sessionHygiene: HYGIENE_HEALTHY,
+    standalone: [],
 } satisfies StatusReport;
 
 /**
@@ -168,6 +171,7 @@ export const statusChurning = {
         peers: [{ peerNodeId: "41869fbd537ef01", fabricIndex: 2, liveSessions: 5 }],
         closed: { superseded: 0, dead: 0, rotated: 0 },
     },
+    standalone: [],
 } satisfies StatusReport;
 
 /** §3.2 — the live endpoint's Matter number, for the plugin's own records. */
@@ -348,6 +352,7 @@ export const rebuiltStatus = {
     warnings: [],
     subscriptionChurn: CHURN_HEALTHY,
     sessionHygiene: HYGIENE_HEALTHY,
+    standalone: [],
 } satisfies StatusReport;
 
 /**
@@ -376,4 +381,35 @@ export const endpointMapInvalid = {
     message_id: "m24",
     error_code: "endpoint_map_invalid",
     details: "endpoint map is unreadable; only get_status, get_pairing and rebuild_endpoint_map are accepted",
+} satisfies ErrorFrame;
+
+/**
+ * ADR-0019 §4.3 — `get_status` with one paired standalone vacuum. The bridged
+ * half is the ordinary populated {@link status}; the vacuum is NOT one of its
+ * endpoints or counted in `endpointCount` — it is its own Matter node, with its
+ * own port and its own fabric list.
+ */
+export const statusStandalone = {
+    ...status,
+    standalone: [
+        {
+            indigoDeviceId: 900021,
+            role: "roboticVacuumCleaner",
+            publishedAs: "indigo-900021",
+            port: 5541,
+            online: true,
+            commissioned: true,
+            fabrics: [APPLE_HOME],
+        },
+    ],
+} satisfies StatusReport;
+
+/** §3.12 — the three standalone pairing answers reuse the §3.7/§3.8 shapes verbatim. */
+export const standalonePairing = pairingUncommissioned satisfies PairingReport;
+export const standaloneWindow = commissioningWindow satisfies CommissioningWindowResult;
+export const standaloneReset = pairingUncommissioned satisfies PairingReport;
+export const standaloneUnknownDevice = {
+    message_id: "m95",
+    error_code: "unknown_device",
+    details: "no standalone accessory for device 424242",
 } satisfies ErrorFrame;

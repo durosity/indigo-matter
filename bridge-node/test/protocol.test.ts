@@ -1127,3 +1127,108 @@ describe("fabric events (§5 / §3.9 / §3.10)", () => {
         });
     });
 });
+
+describe("standalone accessories (§3.12, ADR-0019)", () => {
+    /** Attach the vacuum-only set on a cold double, so the §3.12 target exists. */
+    async function withVacuum(
+        run: (cold: StubBridge, client: TestClient) => Promise<void>,
+    ): Promise<void> {
+        await withColdBridge(async (cold, open) => {
+            const client = await open();
+            try {
+                const vacuum = (golden.attach_all_roles.request.args as { endpoints: Record<string, unknown>[] })
+                    .endpoints.find(spec => spec.role === "roboticVacuumCleaner");
+                assert.ok(vacuum, "attach_all_roles must carry the standalone role");
+                const attached = await client.request({
+                    message_id: "sa0",
+                    command: "attach",
+                    args: { protocolVersion: PROTOCOL_VERSION, pluginVersion: "2026.35.0", endpoints: [vacuum] },
+                });
+                assert.equal(attached.error_code, undefined, JSON.stringify(attached));
+                await run(cold, client);
+            } finally {
+                client.close();
+            }
+        });
+    }
+
+    it("reports a standalone role under `standalone`, never in `endpoints`", async () => {
+        await withVacuum(async (_cold, client) => {
+            const status = (await client.request({ message_id: "sa1", command: "get_status" })).result as {
+                endpointCount: number;
+                endpoints: unknown[];
+                standalone: { indigoDeviceId: number; role: string }[];
+            };
+            assert.equal(status.endpointCount, 0);
+            assert.deepEqual(status.endpoints, []);
+            assert.deepEqual(
+                status.standalone.map(entry => [entry.indigoDeviceId, entry.role]),
+                [[900021, "roboticVacuumCleaner"]],
+            );
+        });
+    });
+
+    it("answers get_standalone_pairing with the golden PairingReport", async () => {
+        await withVacuum(async (cold, client) => {
+            const response = await client.request(golden.get_standalone_pairing.request);
+            assert.deepEqual(response, golden.get_standalone_pairing.response);
+            assert.deepEqual(cold.standaloneCalls, [{ call: "pairing", indigoDeviceId: 900021 }]);
+        });
+    });
+
+    it("answers open_standalone_window with the golden window and passes the duration through", async () => {
+        await withVacuum(async (cold, client) => {
+            const response = await client.request(golden.open_standalone_window.request);
+            assert.deepEqual(response, golden.open_standalone_window.response);
+            assert.deepEqual(cold.standaloneCalls, [{ call: "window", indigoDeviceId: 900021, durationSeconds: 900 }]);
+        });
+    });
+
+    it("defaults open_standalone_window's duration exactly as §3.8 does", async () => {
+        await withVacuum(async (cold, client) => {
+            await client.request({
+                message_id: "sa2",
+                command: "open_standalone_window",
+                args: { indigoDeviceId: 900021 },
+            });
+            assert.equal(cold.standaloneCalls[0]?.durationSeconds, 900);
+        });
+    });
+
+    it("refuses an out-of-range duration with malformed_args, before touching the node", async () => {
+        await withVacuum(async (cold, client) => {
+            const response = await client.request({
+                message_id: "sa3",
+                command: "open_standalone_window",
+                args: { indigoDeviceId: 900021, durationSeconds: 60 },
+            });
+            assert.equal(response.error_code, ErrorCode.malformedArgs);
+            assert.deepEqual(cold.standaloneCalls, []);
+        });
+    });
+
+    it("answers reset_standalone with the golden fresh PairingReport", async () => {
+        await withVacuum(async (_cold, client) => {
+            const response = await client.request(golden.reset_standalone.request);
+            assert.deepEqual(response, golden.reset_standalone.response);
+        });
+    });
+
+    it("refuses a §3.12 call for a device with no standalone accessory (golden)", async () => {
+        await withVacuum(async (_cold, client) => {
+            const response = await client.request(golden.standalone_pairing_unknown_device.request);
+            assert.deepEqual(response, golden.standalone_pairing_unknown_device.response);
+        });
+    });
+
+    it("refuses a non-integer indigoDeviceId with malformed_args", async () => {
+        await withVacuum(async (_cold, client) => {
+            const response = await client.request({
+                message_id: "sa4",
+                command: "reset_standalone",
+                args: { indigoDeviceId: "900021" },
+            });
+            assert.equal(response.error_code, ErrorCode.malformedArgs);
+        });
+    });
+});

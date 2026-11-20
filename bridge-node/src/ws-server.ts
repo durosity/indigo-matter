@@ -104,6 +104,20 @@ export class BridgeWsServer {
             return {};
         });
         this.#handlers.set("rebuild_endpoint_map", async () => this.options.bridge.rebuildEndpointMap());
+        // §3.12 (ADR-0019) — the standalone-accessory family. Each names the
+        // accessory by its driving device, exactly as set_state does.
+        this.#handlers.set("get_standalone_pairing", async args =>
+            this.options.bridge.getStandalonePairing(parseDeviceId(args.indigoDeviceId)),
+        );
+        this.#handlers.set("open_standalone_window", async args =>
+            this.options.bridge.openStandaloneWindow(
+                parseDeviceId(args.indigoDeviceId),
+                parseWindowDuration(args.durationSeconds),
+            ),
+        );
+        this.#handlers.set("reset_standalone", async args =>
+            this.options.bridge.resetStandalone(parseDeviceId(args.indigoDeviceId)),
+        );
         options.bridge.onWindowClosed(reason => this.sendEvent(EventName.windowClosed, { reason }));
         options.bridge.onCommand(data => this.sendEvent(EventName.command, data));
         options.bridge.onDriftDetected(drift => this.sendEvent(EventName.driftDetected, { drift }));
@@ -418,19 +432,7 @@ export class BridgeWsServer {
     }
 
     private async handleOpenWindow(args: Record<string, unknown>): Promise<unknown> {
-        const duration = args.durationSeconds ?? WINDOW_DURATION_DEFAULT_SECONDS;
-        if (
-            typeof duration !== "number" ||
-            !Number.isInteger(duration) ||
-            duration < WINDOW_DURATION_MIN_SECONDS ||
-            duration > WINDOW_DURATION_MAX_SECONDS
-        ) {
-            throw new ProtocolError(
-                ErrorCode.malformedArgs,
-                `durationSeconds must be an integer ${WINDOW_DURATION_MIN_SECONDS}-${WINDOW_DURATION_MAX_SECONDS}`,
-            );
-        }
-        return this.options.bridge.openCommissioningWindow(duration);
+        return this.options.bridge.openCommissioningWindow(parseWindowDuration(args.durationSeconds));
     }
 
     private sendError(socket: WebSocket, messageId: string, code: ErrorCodeValue, details: string): void {
@@ -461,4 +463,25 @@ export class BridgeWsServer {
             return false;
         }
     }
+}
+
+/**
+ * §3.8's `durationSeconds` rule, shared by `open_commissioning_window` and
+ * §3.12's `open_standalone_window` so the two cannot disagree about it.
+ * Absent means the default.
+ */
+function parseWindowDuration(value: unknown): number {
+    const duration = value ?? WINDOW_DURATION_DEFAULT_SECONDS;
+    if (
+        typeof duration !== "number" ||
+        !Number.isInteger(duration) ||
+        duration < WINDOW_DURATION_MIN_SECONDS ||
+        duration > WINDOW_DURATION_MAX_SECONDS
+    ) {
+        throw new ProtocolError(
+            ErrorCode.malformedArgs,
+            `durationSeconds must be an integer ${WINDOW_DURATION_MIN_SECONDS}-${WINDOW_DURATION_MAX_SECONDS}`,
+        );
+    }
+    return duration;
 }

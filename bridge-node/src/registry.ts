@@ -29,6 +29,7 @@ import {
     ErrorCode,
     ProtocolError,
     type RemoveResult,
+    isStandaloneRole,
     type RoleValue,
     supersedes,
     type UpsertResult,
@@ -637,6 +638,12 @@ export class EndpointRegistry {
     private assertSupported(role: RoleValue): void {
         if (!isSupportedRole(role)) {
             throw new ProtocolError(ErrorCode.internal, UNSUPPORTED_ROLE_DETAILS(role));
+        }
+        // ADR-0019 — `node.ts` partitions these out before the registry sees
+        // them. Reaching here is a routing bug, and building one under the
+        // aggregator is exactly the bridged vacuum Apple Home cannot handle.
+        if (isStandaloneRole(role)) {
+            throw new ProtocolError(ErrorCode.internal, `role ${role} is standalone and cannot be bridged`);
         }
     }
 

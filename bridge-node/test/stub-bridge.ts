@@ -17,6 +17,7 @@ import {
     type EndpointSpec,
     ErrorCode,
     type FabricInfo,
+    isStandaloneRole,
     type PairingReport,
     ProtocolError,
     type RemoveFabricResult,
@@ -115,6 +116,13 @@ export interface GoldenFrames {
     factory_reset_discard_map: GoldenExchange;
     rebuild_endpoint_map: GoldenExchange;
     endpoint_map_invalid: GoldenExchange;
+    /** ADR-0019 / §3.12 — the standalone family. */
+    get_status_standalone: GoldenExchange;
+    set_state_robotic_vacuum_cleaner: GoldenExchange;
+    get_standalone_pairing: GoldenExchange;
+    open_standalone_window: GoldenExchange;
+    reset_standalone: GoldenExchange;
+    standalone_pairing_unknown_device: GoldenExchange;
     /**
      * The holding pen for commands the node does not implement yet — EMPTY
      * since E5, and asserted empty. Kept because it is the mechanism the next
@@ -179,12 +187,34 @@ class EndpointModel {
         return undefined;
     }
 
+    /**
+     * ADR-0019 — the real node never counts a standalone role among the
+     * aggregator's endpoints; it reports it under `standalone` instead. The
+     * double mirrors that partition with fixed node facts (first port above
+     * the bridge's 5540, online, not yet paired) — the golden frames' values.
+     */
+    standaloneSummaries(): StatusReport["standalone"] {
+        return [...this.#endpoints.entries()]
+            .filter(([, entry]) => isStandaloneRole(entry.role))
+            .map(([indigoDeviceId, entry]) => ({
+                indigoDeviceId,
+                role: entry.role,
+                publishedAs: entry.publishedAs,
+                port: 5541,
+                online: true,
+                commissioned: false,
+                fabrics: [],
+            }))
+            .sort((a, b) => a.indigoDeviceId - b.indigoDeviceId);
+    }
+
     summaries(): StatusReport["endpoints"] {
         // `battery` is deliberately NOT part of the §4.3 `EndpointSummary` wire
         // shape (it is an `endpoint-map.json` concern, not a StatusReport one)
         // — named fields rather than a spread of `entry`, or the model's own
         // bookkeeping leaks onto the wire.
         return [...this.#endpoints.entries()]
+            .filter(([, entry]) => !isStandaloneRole(entry.role))
             .map(([indigoDeviceId, entry]) => ({
                 indigoDeviceId,
                 role: entry.role,
@@ -321,6 +351,9 @@ export class StubBridge implements BridgeFacade {
             warnings: [...this.warnings],
             subscriptionChurn: structuredClone(this.subscriptionChurn),
             sessionHygiene: structuredClone(this.sessionHygiene),
+            standalone: this.standaloneOverride !== undefined
+                ? structuredClone(this.standaloneOverride)
+                : this.model.standaloneSummaries(),
         };
     }
 
@@ -408,6 +441,38 @@ export class StubBridge implements BridgeFacade {
 
     lastStates?: Record<string, unknown>;
     lastReachable?: boolean;
+
+    /** When set, `getStatus` reports this `standalone` list instead of the model's. */
+    standaloneOverride?: StatusReport["standalone"];
+    /** Devices the §3.12 calls named, in order. */
+    readonly standaloneCalls: Array<{ call: string; indigoDeviceId: number; durationSeconds?: number }> = [];
+
+    private requireStandalone(indigoDeviceId: number): void {
+        if (!this.model.standaloneSummaries().some(entry => entry.indigoDeviceId === indigoDeviceId)) {
+            throw new ProtocolError(
+                ErrorCode.unknownDevice,
+                `no standalone accessory for device ${indigoDeviceId}`,
+            );
+        }
+    }
+
+    async getStandalonePairing(indigoDeviceId: number): Promise<PairingReport> {
+        this.standaloneCalls.push({ call: "pairing", indigoDeviceId });
+        this.requireStandalone(indigoDeviceId);
+        return structuredClone(golden.get_standalone_pairing.response.result) as PairingReport;
+    }
+
+    async openStandaloneWindow(indigoDeviceId: number, durationSeconds: number): Promise<CommissioningWindowResult> {
+        this.standaloneCalls.push({ call: "window", indigoDeviceId, durationSeconds });
+        this.requireStandalone(indigoDeviceId);
+        return structuredClone(golden.open_standalone_window.response.result) as CommissioningWindowResult;
+    }
+
+    async resetStandalone(indigoDeviceId: number): Promise<PairingReport> {
+        this.standaloneCalls.push({ call: "reset", indigoDeviceId });
+        this.requireStandalone(indigoDeviceId);
+        return structuredClone(golden.reset_standalone.response.result) as PairingReport;
+    }
 
     onCommand(listener: (data: CommandEventData) => void): void {
         this.#command = listener;

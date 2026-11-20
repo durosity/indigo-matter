@@ -15,7 +15,8 @@ current version is `Info.plist`'s `PluginVersion`.
   groups work with any vacuum plugin. Status text from Tuya (`smart_clean`,
   `goto_charge`, `charge_done`…) and the common Roomba/Roborock/Ecovacs/Dreame
   wordings is understood; anything unrecognised publishes nothing rather than
-  a guess.
+  a guess. Apple Home's **Play sound to locate** runs a sixth, optional action
+  group (your vacuum plugin's find-me action).
 - A vacuum is its **own Matter accessory**, not part of the bridge (ADR-0019):
   Apple Home and Alexa cannot drive a vacuum behind a bridge. Pair it with the
   new **Plugins ▸ Matter ▸ Pair Matter Vacuum…**, which writes its own code to

@@ -40,6 +40,7 @@ import { Endpoint, type EndpointType, Logger, type MaybePromise, type MutableEnd
 import { BridgedDeviceBasicInformationServer } from "@matter/main/behaviors/bridged-device-basic-information";
 import { ColorControlServer, xyToHsv } from "@matter/main/behaviors/color-control";
 import { DoorLockServer } from "@matter/main/behaviors/door-lock";
+import { IdentifyServer } from "@matter/main/behaviors/identify";
 import { LevelControlServer } from "@matter/main/behaviors/level-control";
 import { OccupancySensingServer } from "@matter/main/behaviors/occupancy-sensing";
 import { OnOffServer } from "@matter/main/behaviors/on-off";
@@ -51,6 +52,7 @@ import { ThermostatServer } from "@matter/main/behaviors/thermostat";
 import { MovementDirection, MovementType, WindowCoveringServer } from "@matter/main/behaviors/window-covering";
 import { ColorControl } from "@matter/main/clusters/color-control";
 import { DoorLock } from "@matter/main/clusters/door-lock";
+import { Identify } from "@matter/main/clusters/identify";
 import { LevelControl } from "@matter/main/clusters/level-control";
 import { ModeBase } from "@matter/main/clusters/mode-base";
 import { RvcOperationalState } from "@matter/main/clusters/rvc-operational-state";
@@ -1493,8 +1495,34 @@ class IndigoRvcOperationalStateServer extends RvcOperationalStateServer {
     }
 }
 
+/**
+ * Identify, for a vacuum, is "play sound to locate" (Apple Home's own button).
+ *
+ * The stock server only runs `identifyTime` down — it makes no sound, because a
+ * matter.js node has nothing to make one with. So the invocation is reported as
+ * §4.2 `locate {"seconds": n}` and the plugin runs whatever finds the vacuum.
+ * `super.identify()` is still called: the countdown and `isIdentifying` are the
+ * cluster's own bookkeeping, not a claim about the machine, and an ecosystem
+ * reads them to show the button as active. `identifyTime: 0` is a cancel, and
+ * no vacuum has a "stop beeping", so it is passed to stock and not reported.
+ *
+ * `failWithoutSink` as for every other vacuum command: "playing a sound" when
+ * nothing will play one sends the user hunting for a silent vacuum.
+ */
+class IndigoIdentifyServer extends IdentifyServer {
+    override identify(request: Identify.IdentifyRequest): MaybePromise {
+        if (request.identifyTime > 0) {
+            emitCommand(this.endpoint.id, "locate", { seconds: request.identifyTime }, true);
+        }
+        return super.identify(request);
+    }
+}
+
 function rvcDefaults(): Record<string, unknown> {
     return {
+        // AudibleBeep tells an ecosystem what "identify" means on this device,
+        // which is how Apple Home labels it "Play sound".
+        identify: { identifyType: Identify.IdentifyType.AudibleBeep },
         [RVC_RUN_MODE]: { supportedModes: RVC_SUPPORTED_MODES, currentMode: RVC_MODE_IDLE },
         [RVC_OPERATIONAL_STATE]: {
             // Every state §4.2 can push must be listed, or matter.js refuses the
@@ -2546,7 +2574,11 @@ const ROLE_DEFINITIONS: Record<RoleValue, RoleDefinition> = {
     },
     [Role.roboticVacuumCleaner]: {
         deviceType: () =>
-            RoboticVacuumCleanerDevice.with(IndigoRvcRunModeServer, IndigoRvcOperationalStateServer),
+            RoboticVacuumCleanerDevice.with(
+                IndigoRvcRunModeServer,
+                IndigoRvcOperationalStateServer,
+                IndigoIdentifyServer,
+            ),
         initialState: rvcDefaults,
         statePatch: rvcPatch,
         // Invocation-driven, like doorLock: neither attribute is ever written

@@ -702,6 +702,7 @@ class ExportDialogMixin:
         "exportRvcPause": "pause",
         "exportRvcResume": "resume",
         "exportRvcGoHome": "goHome",
+        "exportRvcLocate": "locate",
     }
 
     def _rvc_options_from_values(self, values: dict) -> dict:
@@ -1277,8 +1278,10 @@ class ExportDialogMixin:
         """What the user must do next for a vacuum, which pairing the bridge does not cover."""
         if role != export_catalog.ROLE_ROBOTIC_VACUUM:
             return ""
+        # resume falls back to start's group, and locate is optional (a vacuum
+        # with no find-me action has nothing to choose) — neither is nagged for.
         missing = [command for command, key in export_catalog.RVC_ACTION_OPTIONS.items()
-                   if key not in options and command != "resume"]
+                   if key not in options and command not in ("resume", "locate")]
         gap = (f" No action group is chosen for {', '.join(missing)} — those buttons will do "
                "nothing in Apple Home until you choose one." if missing else "")
         return ("It is its own Matter accessory: add it with Plugins ▸ Matter ▸ Pair Matter "

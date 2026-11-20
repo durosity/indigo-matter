@@ -129,10 +129,11 @@ class TestStates:
 class TestCommands:
     OPTIONS = {
         "rvcActionStart": 11, "rvcActionStop": 12, "rvcActionPause": 13, "rvcActionGoHome": 15,
+        "rvcActionLocate": 16,
     }
 
     @pytest.mark.parametrize("command, group", [
-        ("start", 11), ("stop", 12), ("pause", 13), ("goHome", 15),
+        ("start", 11), ("stop", 12), ("pause", 13), ("goHome", 15), ("locate", 16),
         # resume has no group of its own here, so it reuses start's.
         ("resume", 11),
     ])
@@ -160,6 +161,8 @@ class TestCommands:
         assert handler.dispatch("stop", {}, dev, {}) is True
         mock_indigo_base.device.turnOff.assert_called_once_with(dev)
         assert isinstance(handler.dispatch("pause", {}, dev, {}), str)
+        assert isinstance(handler.dispatch("locate", {}, dev, {}), str), "no on/off fallback for a sound"
+        mock_indigo_base.device.turnOn.assert_called_once()
 
     def test_nothing_is_auto_confirmed(self, handlers):
         """PRD §7 — a command never claims the vacuum moved."""
@@ -185,8 +188,10 @@ class TestStore:
     def test_accepts_a_full_vacuum_declaration(self):
         entry = ExportEntry.from_dict(self._entry(
             rvcStateKey="status", rvcBatteryKey="electricity_left",
-            rvcActionStart=1, rvcActionStop=2, rvcActionPause=3, rvcActionResume=4, rvcActionGoHome=5))
+            rvcActionStart=1, rvcActionStop=2, rvcActionPause=3, rvcActionResume=4, rvcActionGoHome=5,
+            rvcActionLocate=6))
         assert entry.options["rvcActionGoHome"] == 5
+        assert entry.options["rvcActionLocate"] == 6
 
     @pytest.mark.parametrize("options", [
         {"rvcActionStart": "1"}, {"rvcActionStart": 0}, {"rvcActionStart": True},

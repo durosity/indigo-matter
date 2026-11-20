@@ -781,7 +781,7 @@ ecosystem acts. Both are enumerated here in full; there is no other source.
 | `pressureSensor` | Pressure Sensor | `pressureKPa: float` | — |
 | `flowSensor` | Flow Sensor | `flowM3h: float` | — |
 | `thermostat` | Thermostat | `localTemperatureC: float`, `heatingSetpointC: float`, `coolingSetpointC: float`, `systemMode: str` | `setHeatingSetpoint {"valueC": float}`, `setCoolingSetpoint {"valueC": float}`, `setSystemMode {"mode": str}` |
-| `roboticVacuumCleaner` | Robotic Vacuum Cleaner (0x0074) — **standalone** (§3.12) | `operationalState: str` | `start {}`, `stop {}`, `pause {}`, `resume {}`, `goHome {}` |
+| `roboticVacuumCleaner` | Robotic Vacuum Cleaner (0x0074) — **standalone** (§3.12) | `operationalState: str` | `start {}`, `stop {}`, `pause {}`, `resume {}`, `goHome {}`, `locate {"seconds": int}` |
 
 - **`smokeAlarm` and `coAlarm` are two roles over one Matter device type, and
   the node writes an attribute the plugin never sends.** Smoke CO Alarm 0x0076
@@ -834,7 +834,11 @@ ecosystem acts. Both are enumerated here in full; there is no other source.
   error state; any other state clears it. Commands: an ecosystem's Run Mode
   change to Cleaning is `start`, to Idle is `stop` (Matter's "stop where you
   are" — returning to the dock is `goHome`, on the Operational State cluster);
-  `pause`/`resume`/`goHome` are that cluster's commands. None writes either
+  `pause`/`resume`/`goHome` are that cluster's commands. `locate` is the
+  Identify cluster's `identify` — Apple Home's "Play sound to locate" — with
+  the ecosystem's `IdentifyTime` as `seconds`; the endpoint advertises
+  `IdentifyType: AudibleBeep`, and a cancel (`identifyTime: 0`) is not
+  reported, since no vacuum has a "stop beeping". None writes either
   attribute (PRD §7), and — like `lock`/`unlock` — each FAILS the invocation
   when the plugin is not connected, because "the vacuum started" is not
   something to tell a user about a machine nobody instructed. `batteryLevel`

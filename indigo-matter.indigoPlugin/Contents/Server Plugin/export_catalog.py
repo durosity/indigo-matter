@@ -181,6 +181,9 @@ RVC_ACTION_OPTIONS = {
     "pause": "rvcActionPause",
     "resume": "rvcActionResume",
     "goHome": "rvcActionGoHome",
+    # Identify — "Play sound to locate". Optional: a vacuum plugin without a
+    # find-me action simply leaves it unset, and Home's button does nothing.
+    "locate": "rvcActionLocate",
 }
 RVC_OPTION_KEYS = (OPTION_RVC_STATE_KEY, OPTION_RVC_BATTERY_KEY, *RVC_ACTION_OPTIONS.values())
 

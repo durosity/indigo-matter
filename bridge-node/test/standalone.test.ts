@@ -16,8 +16,10 @@ import { join } from "node:path";
 import { after, describe, it } from "node:test";
 
 import { Environment } from "@matter/main";
+import { IdentifyServer } from "@matter/main/behaviors/identify";
 import { RvcOperationalStateServer } from "@matter/main/behaviors/rvc-operational-state";
 import { RvcRunModeServer } from "@matter/main/behaviors/rvc-run-mode";
+import { Identify } from "@matter/main/clusters/identify";
 import { RvcOperationalState } from "@matter/main/clusters/rvc-operational-state";
 
 import {
@@ -248,6 +250,25 @@ describe("StandaloneHost on a real matter.js node", () => {
             // PRD §7 — nothing moved: the state is still the last confirmed one.
             assert.equal(rvcState(h).operationalState, RvcOperationalState.OperationalState.Docked);
             assert.equal(rvcState(h).currentMode, RVC_MODE_IDLE);
+        } finally {
+            await h.close();
+        }
+    });
+
+    it("reports Identify as locate (Apple Home's 'Play sound'), and a cancel as nothing", async () => {
+        const h = harness();
+        try {
+            await h.host.reconcile([vacuumSpec()]);
+            const endpoint = h.host.endpointFor(VACUUM);
+            assert.ok(endpoint);
+            assert.equal(
+                (endpoint.stateOf(IdentifyServer) as { identifyType: number }).identifyType,
+                Identify.IdentifyType.AudibleBeep,
+                "advertised as a sound, so ecosystems label it 'Play sound'",
+            );
+            await endpoint.act(agent => agent.get(IdentifyServer).identify({ identifyTime: 10 }));
+            await endpoint.act(agent => agent.get(IdentifyServer).identify({ identifyTime: 0 }));
+            assert.deepEqual(h.commands, [{ indigoDeviceId: VACUUM, command: "locate", args: { seconds: 10 } }]);
         } finally {
             await h.close();
         }

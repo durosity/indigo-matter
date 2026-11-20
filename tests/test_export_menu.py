@@ -2739,7 +2739,7 @@ def test_polarity_applies_to_a_plain_onstate_sensor(plug, devices):
 # ---------------------------------------------------------------------------
 VACUUM = 900021
 RVC_FIELDS = ("exportRvcStateKey", "exportRvcBatteryKey", "exportRvcStart", "exportRvcStop",
-              "exportRvcPause", "exportRvcResume", "exportRvcGoHome")
+              "exportRvcPause", "exportRvcResume", "exportRvcGoHome", "exportRvcLocate")
 
 
 @pytest.fixture
@@ -2811,6 +2811,7 @@ def test_saving_a_vacuum_stores_only_what_was_chosen(plug, vacuum):  # noqa: ARG
     status = values["exportStatus"]
     assert "Pair Matter Vacuum" in status
     assert "pause" in status and "goHome" not in status, "names only the commands left without a group"
+    assert "locate" not in status, "locate is optional and never nagged for"
 
 
 def test_reopening_a_saved_vacuum_shows_its_choices(plug, vacuum):  # noqa: ARG001

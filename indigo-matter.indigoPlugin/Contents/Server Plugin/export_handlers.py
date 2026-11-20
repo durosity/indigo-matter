@@ -1623,7 +1623,9 @@ class RoboticVacuumExport(ExportHandler):
       can put whatever their plugin needs inside one. A relay-shaped device
       with no ``start``/``stop`` group falls back to on/off; ``resume`` with
       no group of its own reuses ``start``'s — on every vacuum seen, "carry
-      on" and "go" are the same instruction.
+      on" and "go" are the same instruction. ``locate`` (Identify, Apple
+      Home's "Play sound to locate") has no fallback: only the vacuum's own
+      find-me action makes a sound.
 
     Never auto-confirms (PRD §7): a command runs the action group and
     returns; what ecosystems see moves only when the status state does.

@@ -48,7 +48,10 @@
     "other spec but in the response under 'standalone', never in 'endpoints' or",
     "'endpointCount', because it is its own Matter node, not an aggregator child.",
     "Its pairing family names the accessory by indigoDeviceId and answers with the",
-    "same PairingReport/CommissioningWindowResult shapes as §3.7/§3.8."
+    "same PairingReport/CommissioningWindowResult shapes as §3.7/§3.8.",
+    "",
+    "'command_locate' is Identify on a vacuum — Apple Home's 'Play sound to locate'.",
+    "'seconds' is the ecosystem's IdentifyTime; a cancel (0) is never reported."
   ],
   "handshake": {
     "protocolVersion": 2,
@@ -1961,6 +1964,16 @@
       "indigoDeviceId": 900021,
       "command": "goHome",
       "args": {}
+    }
+  },
+  "command_locate": {
+    "event": "command",
+    "data": {
+      "indigoDeviceId": 900021,
+      "command": "locate",
+      "args": {
+        "seconds": 10
+      }
     }
   }
 }

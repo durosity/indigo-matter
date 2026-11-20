@@ -239,7 +239,8 @@ ROLE_COMMANDS = {
     "thermostat": ("setHeatingSetpoint", "setCoolingSetpoint", "setSystemMode"),
     # `stop` is Matter's "change to Idle": stop where you are. Going back to
     # the dock is `goHome`, a separate command on a separate cluster.
-    "roboticVacuumCleaner": ("start", "stop", "pause", "resume", "goHome"),
+    # `locate` is Identify — Apple Home's "Play sound to locate".
+    "roboticVacuumCleaner": ("start", "stop", "pause", "resume", "goHome", "locate"),
 }
 
 #: The v1 role enum (§4.2) — derived, so a role can only exist with both of its

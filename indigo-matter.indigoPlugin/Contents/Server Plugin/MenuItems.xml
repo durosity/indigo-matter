@@ -456,6 +456,13 @@ A Matter pairing code is not durable: once used, or once the window expires (up 
                 <Label>Return to dock runs:</Label>
                 <List class="self" method="getExportActionGroups" dynamicReload="true"/>
             </Field>
+            <Field id="exportRvcLocate" type="menu" defaultValue="0"
+                   visibleBindingId="exportRole" visibleBindingValue="roboticVacuumCleaner"
+                   alwaysUseInDialogHeightCalc="true">
+                <Label>Play sound runs:</Label>
+                <List class="self" method="getExportActionGroups" dynamicReload="true"/>
+                <Description>Apple Home's "Play sound to locate". Leave as none if your vacuum plugin has no find-me action.</Description>
+            </Field>
             <Field id="exportAdd" type="button">
                 <Label></Label>
                 <Title>Add / update export</Title>

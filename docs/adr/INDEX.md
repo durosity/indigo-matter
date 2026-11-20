@@ -37,4 +37,6 @@ chosen), see [`../ARCHITECTURE.md`](../ARCHITECTURE.md).
 
 * [ADR-0018](0018-a-re-paired-node-is-rebound-onto-its-existing-devices.md) - ADR-0018: A re-paired node is rebound onto its existing Indigo devices (accepted)
 
+* [ADR-0019](0019-a-robot-vacuum-is-its-own-matter-node-not-a-bridged-child.md) - ADR-0019: A robot vacuum is published as its own Matter node, not a bridged child (proposed)
+
 <!-- adrlogstop -->

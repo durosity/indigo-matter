@@ -3,6 +3,35 @@
 Notable changes per release. Versions are `YYYY.R.P`; the authoritative
 current version is `Info.plist`'s `PluginVersion`.
 
+## 2026.35.0 — Export a robot vacuum to Apple Home (its own Matter accessory)
+
+- New: a robot vacuum can be exported as a native Matter **Robotic Vacuum
+  Cleaner** — start, stop, pause, resume, return to dock and battery in Apple
+  Home, and Siri ("Hey Siri, start the vacuum"). In **Manage Matter Exports…**
+  a device that looks like a vacuum (by its name, model, owning plugin, or
+  states such as `suction` or `mop`) is offered as **Robot vacuum (paired
+  separately)**. Choose the state carrying its status (or leave it on
+  Automatic) and the Indigo **action group** each command runs — action
+  groups work with any vacuum plugin. Status text from Tuya (`smart_clean`,
+  `goto_charge`, `charge_done`…) and the common Roomba/Roborock/Ecovacs/Dreame
+  wordings is understood; anything unrecognised publishes nothing rather than
+  a guess.
+- A vacuum is its **own Matter accessory**, not part of the bridge (ADR-0019):
+  Apple Home and Alexa cannot drive a vacuum behind a bridge. Pair it with the
+  new **Plugins ▸ Matter ▸ Pair Matter Vacuum…**, which writes its own code to
+  the Event Log (and can unpair it everywhere and issue new codes). Pairing
+  the bridge does not add it.
+- **Needs bridge node 0.18.0.** Until the bridge is updated
+  (**Install/update the Matter bridge**), the vacuum is held back with one
+  warning and every other export carries on. Bridge node 0.18.0 must be
+  published to npm and pinned before this reaches installs (see
+  CLAUDE.md, "Releasing the bridge node").
+- Bridge protocol (BRIDGE_PROTOCOL §3.12, §4.2, §4.3): the
+  `roboticVacuumCleaner` role, `get_standalone_pairing`,
+  `open_standalone_window`, `reset_standalone`, and `StatusReport.standalone`
+  (additive; no `protocolVersion` bump).
+- Not in this version: cleaning modes (vacuum / mop) and room selection.
+
 ## 2026.34.0 — Warn when matter-server is older than this plugin release expects
 
 - Fix (issue #75): upgrading the plugin never upgraded matter-server. The pinned

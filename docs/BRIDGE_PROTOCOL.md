@@ -619,6 +619,62 @@ The name is timestamped for the same reason `identity.json.unreadable-<stamp>`
 is: a fixed name means the second quarantine silently destroys the first, and
 the first is the one nearest the original truth.
 
+### 3.12 Standalone accessories: `get_standalone_pairing`, `open_standalone_window`, `reset_standalone`
+
+ADR-0019, since bridge-node 0.18.0. A **standalone role** (§4.2 — today only
+`roboticVacuumCleaner`) is never built under the aggregator. The node hosts
+each one as its **own** Matter node, in the same process: its own UDP port
+(the first free port above the bridge's own `--matter-port`, persisted), its
+own storage context, its own fabrics and its own pairing codes. Apple Home
+and Alexa do not support a bridged Robotic Vacuum Cleaner, which is the whole
+reason this exists.
+
+Everything else about a standalone accessory uses the ordinary commands,
+addressed by `indigoDeviceId` exactly as for a bridged one:
+
+- **`attach`** (§3.1) partitions: standalone specs go to their own nodes,
+  everything else to the aggregator. The mass-removal guard is decided ONCE
+  for the whole attach — an attach carrying only a standalone spec is not
+  "remove everything", and an attach carrying nothing still needs
+  `intent: "replace_all"` whichever side its live accessories are on. A
+  standalone spec **omitted** from an attach makes that accessory *dormant*:
+  its node is closed but its storage and pairings are kept, because the
+  plugin omits specs for transient reasons too (an unreadable state, a
+  version-skew skip). It comes back, same node and same pairings, the next
+  time an attach carries it.
+- **`upsert_endpoint`** (§3.2) moves a device between a bridged role and a
+  standalone one in either direction: the superseded side is removed.
+- **`remove_endpoint`** (§3.3) **destroys**: the node's fabrics and storage are
+  erased (ADR-0015/0016's rule, applied to a whole node). A dormant record is
+  erased too.
+- **`set_state`/`set_reachable`** (§3.4/§3.5) route to the accessory's node;
+  `Reachable` is the root Basic Information attribute rather than Bridged
+  Device Basic Information, which a standalone node does not have.
+- **`command`** events (§5) are identical in shape.
+- **`factory_reset`** (§3.10) and **`remove_fabric`** (§3.9) are the BRIDGE's
+  and do not touch standalone accessories, which have pairings of their own.
+
+The three commands below are the standalone node's §3.7/§3.8/§3.10, with the
+same result shapes. Each takes `{"indigoDeviceId": int}` and answers
+`unknown_device` for a device with no live standalone accessory.
+
+- **`get_standalone_pairing`** → `PairingReport` (§3.7). Never paired: the
+  basic window is open under the accessory's initial codes.
+- **`open_standalone_window`** `{"indigoDeviceId", "durationSeconds"?}` →
+  `CommissioningWindowResult` (§3.8; same duration rule and default). Refused
+  with `commissioning_window_failed` while the accessory has never been paired
+  — its initial code is already open, and matter.js will not open an enhanced
+  window on top of it.
+- **`reset_standalone`** → `PairingReport`. Erases the accessory's fabrics and
+  re-advertises under **new** initial codes (a code someone photographed
+  should not still work). Pairings elsewhere on the bridge are untouched.
+
+Not carried over to standalone nodes, deliberately: the endpoint-number map,
+drift detection and the commissioning witness (PRD §7). Each exists because a
+bridge renumbering its children duplicates accessories; a standalone node has
+one device endpoint, always number 1. Known gap (ADR-0019): lost fabric
+storage on a standalone node is not detected — it simply advertises again.
+
 ## 4. Shapes
 
 ### 4.1 `EndpointSpec`
@@ -725,6 +781,7 @@ ecosystem acts. Both are enumerated here in full; there is no other source.
 | `pressureSensor` | Pressure Sensor | `pressureKPa: float` | — |
 | `flowSensor` | Flow Sensor | `flowM3h: float` | — |
 | `thermostat` | Thermostat | `localTemperatureC: float`, `heatingSetpointC: float`, `coolingSetpointC: float`, `systemMode: str` | `setHeatingSetpoint {"valueC": float}`, `setCoolingSetpoint {"valueC": float}`, `setSystemMode {"mode": str}` |
+| `roboticVacuumCleaner` | Robotic Vacuum Cleaner (0x0074) — **standalone** (§3.12) | `operationalState: str` | `start {}`, `stop {}`, `pause {}`, `resume {}`, `goHome {}` |
 
 - **`smokeAlarm` and `coAlarm` are two roles over one Matter device type, and
   the node writes an attribute the plugin never sends.** Smoke CO Alarm 0x0076
@@ -766,6 +823,23 @@ ecosystem acts. Both are enumerated here in full; there is no other source.
   doc). No frame or wire change in either direction, and the plugin's own
   push (brightness 0 whenever Indigo reports the dimmer off) is unchanged
   too — the asymmetry is entirely inside the node's write.
+- **`roboticVacuumCleaner` is the one standalone role** (§3.12, ADR-0019): it
+  is published as its own Matter node, never under the aggregator.
+  `operationalState` domain: `"stopped" | "running" | "paused" | "error" |
+  "seekingCharger" | "charging" | "docked"`. The node owns the mapping to RVC
+  Operational State's enum and **derives RVC Run Mode** from it — Cleaning
+  while `running`/`paused`, Idle otherwise — for the same reason `smokeAlarm`
+  derives `expressedState`: Indigo carries one reading and the two attributes
+  must agree. `error` publishes RVC's generic `UnableToCompleteOperation`
+  error state; any other state clears it. Commands: an ecosystem's Run Mode
+  change to Cleaning is `start`, to Idle is `stop` (Matter's "stop where you
+  are" — returning to the dock is `goHome`, on the Operational State cluster);
+  `pause`/`resume`/`goHome` are that cluster's commands. None writes either
+  attribute (PRD §7), and — like `lock`/`unlock` — each FAILS the invocation
+  when the plugin is not connected, because "the vacuum started" is not
+  something to tell a user about a machine nobody instructed. `batteryLevel`
+  (below) works as for any battery endpoint. RVC Clean Mode and Service Area
+  (rooms) are not published in this version.
 - Thermostat **fan is not part of v1** (the Fan descope, PRD §5.2); there are
   no fan state keys or commands. v2 candidate.
 - Units are Indigo-natural at the protocol boundary (°C, %, lux, 0–100);
@@ -854,8 +928,19 @@ ecosystem acts. Both are enumerated here in full; there is no other source.
  "driftChecked": false,
  "warnings": [],
  "subscriptionChurn": {"checked": true, "active": false, "peers": []},
- "sessionHygiene": {"checked": true, "peers": [], "closed": {"superseded": 0, "dead": 0, "rotated": 0}}}
+ "sessionHygiene": {"checked": true, "peers": [], "closed": {"superseded": 0, "dead": 0, "rotated": 0}},
+ "standalone": [{"indigoDeviceId": 900021, "role": "roboticVacuumCleaner",
+                 "publishedAs": "indigo-900021", "port": 5541, "online": true,
+                 "commissioned": true, "fabrics": [{"fabricIndex": 1, "label": "Apple Home", "vendorId": 4937}]}]}
 ```
+
+`standalone` (ADR-0019, additive since bridge-node 0.18.0 with no
+`protocolVersion` bump — the `subscriptionChurn` precedent) lists the ACTIVE
+standalone accessories (§3.12), dormant ones excluded. They are never in
+`endpoints` or `endpointCount`, which describe the aggregator. `online: false`
+means the accessory's own node failed to start (typically its port is taken);
+the reason is in `warnings`. `commissioned`/`fabrics` are that node's own. A
+client must read an absent field (an older node) as `[]`.
 
 `drift` lists any `UniqueID → endpointNumber` mappings that changed since last
 persist (PRD §4.3 drift detection); non-empty drift is surfaced as a plugin

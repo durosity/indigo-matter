@@ -82,6 +82,13 @@ accessory. One bridge, one pairing, however many devices.
   flag Indigo can read, so the dialog asks which of its states is the reading. Map the
   first zone of a panel and the rest pre-select the same state. Only on/off states can be
   mapped in this version.
+- **Robot vacuums are exported as their own accessory** (2026.35.0, bridge 0.18.0,
+  ADR-0019). Apple Home and Alexa cannot drive a vacuum behind a bridge, so a vacuum is
+  published as a standalone Matter Robotic Vacuum Cleaner with its own pairing code —
+  pair it with **Plugins ▸ Matter ▸ Pair Matter Vacuum…**, not by pairing the bridge.
+  Start, stop, pause, resume and return-to-dock each run an Indigo action group you
+  choose, so any vacuum plugin works; status and battery are read from its states.
+  Cleaning modes and room selection are not published yet. Not yet field-validated.
 - **Expect an "uncertified accessory" prompt** and choose *Add Anyway*. The bridge presents
   a development attestation certificate — as Homebridge, matterbridge and Home Assistant's
   bridge all do — and outbound attestation is the commissioning ecosystem's policy, not

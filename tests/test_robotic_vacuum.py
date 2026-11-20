@@ -292,3 +292,44 @@ class TestVersionGuard:
         assert [spec.indigo_device_id for spec in bridge.endpoint_specs()] == [101]
         warned = " ".join(str(call) for call in mock_logger.warning.call_args_list)
         assert "too old to publish a robot vacuum" in warned
+
+
+class TestAttachReport:
+    """Field report 2026-11-20: with only a vacuum exported the attach line read
+    "0 endpoint(s) live, not yet paired" and said nothing about the vacuum."""
+
+    def _status(self, **summary):
+        base = {"indigoDeviceId": VACUUM, "role": ROLE, "publishedAs": f"indigo-{VACUUM}", "port": 5541,
+                "online": True, "commissioned": False, "fabrics": []}
+        result = dict(FRAMES["get_status"]["response"]["result"])
+        result["standalone"] = [{**base, **summary}]
+        return bridge_protocol.parse_status(result)
+
+    def _logged(self, logger):
+        calls = logger.info.call_args_list + logger.warning.call_args_list
+        return " ".join(str(c.args[0]) % c.args[1:] if len(c.args) > 1 else str(c.args[0]) for c in calls)
+
+    def _bridge(self, bridge_mod, mock_logger):
+        entry = ExportEntry(VACUUM, ROLE, name_override="Hallway Roomba")
+        return _bridge(bridge_mod, mock_logger, FakeIndigoDevices([tuya_vacuum()]), [entry], "0.18.0")
+
+    def test_an_unpaired_vacuum_points_at_the_vacuum_pairing_menu(self, bridge_mod, mock_logger):
+        self._bridge(bridge_mod, mock_logger)._report_standalone(self._status())
+        logged = self._logged(mock_logger)
+        assert '"Hallway Roomba" is online' in logged and "port 5541" in logged
+        assert "Pair Matter Vacuum" in logged
+
+    def test_a_paired_vacuum_says_how_many_ecosystems(self, bridge_mod, mock_logger):
+        status = self._status(commissioned=True, fabrics=[{"fabricIndex": 1, "label": "", "vendorId": 4937}])
+        self._bridge(bridge_mod, mock_logger)._report_standalone(status)
+        assert "paired with 1 ecosystem" in self._logged(mock_logger)
+
+    def test_a_vacuum_whose_node_failed_is_a_warning(self, bridge_mod, mock_logger):
+        self._bridge(bridge_mod, mock_logger)._report_standalone(self._status(online=False))
+        assert "could NOT start" in str(mock_logger.warning.call_args_list)
+
+    def test_an_older_node_reports_nothing_extra(self, bridge_mod, mock_logger):
+        status = bridge_protocol.parse_status(
+            {k: v for k, v in FRAMES["get_status"]["response"]["result"].items() if k != "standalone"})
+        self._bridge(bridge_mod, mock_logger)._report_standalone(status)
+        assert self._logged(mock_logger) == ""

@@ -1912,6 +1912,7 @@ class ExportBridge:
         self._logger.info("Matter bridge: bridge node attached — %d endpoint(s) live, %s",
                           status.endpoint_count,
                           "commissioned" if status.commissioned else "not yet paired")
+        self._report_standalone(status)
         self._report_node_warnings(status)
         self._health._apply_subscription_churn(  # pylint: disable=protected-access
             getattr(status, "subscription_churn", None), getattr(status, "fabrics", None))
@@ -1932,6 +1933,36 @@ class ExportBridge:
                 self._stop_soon("closing the bridge client after the outstanding un-export")
                 self._fire(self._stop_agent_off_loop(),
                            "stopping the bridge agent after the outstanding un-export")
+
+    def _report_standalone(self, status) -> None:
+        """Say where each standalone accessory (the robot vacuum) is, after an attach.
+
+        The line above counts only the BRIDGE's endpoints, so with just a vacuum
+        exported it read "0 endpoint(s) live, not yet paired" — true of the
+        bridge, silent about the one thing the user exported (field report,
+        2026-11-20). A vacuum is its own Matter node with its own pairing
+        (ADR-0019), so it gets its own line: online or not, and whether it
+        still needs Pair Matter Vacuum….
+        """
+        for summary in getattr(status, "standalone", None) or []:
+            entry = self._store.get(summary.indigo_device_id)
+            dev = self._device_getter(summary.indigo_device_id)
+            name = entry.label_for(str(getattr(dev, "name", "") or "")) if entry is not None \
+                else f"device {summary.indigo_device_id}"
+            if not summary.online:
+                self._logger.warning(
+                    "Matter bridge: robot vacuum \"%s\" could NOT start its own Matter node on port %s — "
+                    "see the warning that follows (usually something else is using that port).",
+                    name, summary.port)
+            elif summary.commissioned:
+                self._logger.info(
+                    "Matter bridge: robot vacuum \"%s\" is online as its own Matter accessory (port %s), "
+                    "paired with %d ecosystem(s).", name, summary.port, len(summary.fabrics))
+            else:
+                self._logger.info(
+                    "Matter bridge: robot vacuum \"%s\" is online as its own Matter accessory (port %s) "
+                    "and not yet paired — use Plugins ▸ Matter ▸ Pair Matter Vacuum… to add it. "
+                    "Pairing the bridge does not add it.", name, summary.port)
 
     def _report_node_warnings(self, status) -> None:
         """Say what the node could not persist (§4.3 ``warnings``).

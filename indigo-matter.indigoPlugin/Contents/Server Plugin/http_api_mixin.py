@@ -9,7 +9,7 @@ import json
 import time
 from concurrent.futures import TimeoutError as FuturesTimeoutError
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Optional
 
 import indigo  # provided by the Indigo runtime
 
@@ -297,7 +297,7 @@ class HttpApiMixin:
         This is the *only* handler here that returns HTML rather than JSON, and
         it exists because the one thing the event log cannot carry is a QR code.
         """
-        method, _path_args, _query = self._parse_request(action)
+        method, _path_args, query = self._parse_request(action)
         if method.upper() != "GET":
             # Cache-Control: no-store — mirrors http_thread_page's fix below (#334,
             # 2026-09-01): this page carries a LIVE pairing code, an even stronger
@@ -310,10 +310,10 @@ class HttpApiMixin:
         reply = indigo.Dict()
         reply["status"] = 200
         reply["headers"] = indigo.Dict({"Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store"})
-        reply["content"] = self._pairing_page()
+        reply["content"] = self._pairing_page(query)
         return reply
 
-    def _pairing_page(self) -> str:
+    def _pairing_page(self, query: Optional[dict] = None) -> str:
         """Build the pairing page's HTML from a live ``get_pairing``.
 
         **No QR is generated here, and that is a deliberate choice.** Rendering
@@ -330,8 +330,17 @@ class HttpApiMixin:
         if client is None or not client.connected:
             return _pairing_html(None, "The plugin is not connected to the Matter bridge node. "
                                        "Export at least one device, then reload this page.")
+        # ADR-0019 — `?device=<id>` shows a robot vacuum's OWN code instead: it
+        # is a separate Matter accessory and does not pair through the bridge.
+        device = str((query or {}).get("device", "") or "").strip()
+        if device and not device.isdigit():
+            return _pairing_html(None, "That is not a device id.")
         try:
-            pairing = self.runtime.submit(client.get_pairing()).result(timeout=PAIRING_READ_TIMEOUT)
+            if device:
+                pairing = self.runtime.submit(client.get_standalone_pairing(int(device))).result(
+                    timeout=PAIRING_READ_TIMEOUT)
+            else:
+                pairing = self.runtime.submit(client.get_pairing()).result(timeout=PAIRING_READ_TIMEOUT)
         except Exception as exc:  # pylint: disable=broad-except
             # Absorbing: any failure reading pairing state — timeout, dead runtime,
             # protocol error. Safe because this handler returns HTML to a human at a
@@ -344,7 +353,8 @@ class HttpApiMixin:
             return _pairing_html(
                 pairing,
                 "No pairing window is open, so there is no code to show. Open one with "
-                "Plugins ▸ Matter ▸ Pair Matter Bridge… in Indigo.")
+                + ("Plugins ▸ Matter ▸ Pair Matter Vacuum…" if device else "Plugins ▸ Matter ▸ Pair Matter Bridge…")
+                + " in Indigo.")
         return _pairing_html(pairing, "")
 
     # ------------------------------------------------------------------

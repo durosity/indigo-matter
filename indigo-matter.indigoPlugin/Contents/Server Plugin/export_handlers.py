@@ -498,6 +498,16 @@ class ExportHandler:
             states = {**states, STATE_BATTERY_LEVEL: percent}
         return states
 
+    def has_battery(self, dev: Any, _options: Optional[dict] = None) -> bool:
+        """§4.1 ``battery`` — whether this export has a battery to publish.
+
+        Evidence, not a reading: ``batteryLevel`` EXISTING is the test (a 0 is
+        an untrustworthy reading, not a missing battery — see ``_spec_for``).
+        A role whose battery can live elsewhere overrides this
+        (:class:`RoboticVacuumExport`, whose plugin keeps it in a state).
+        """
+        return getattr(dev, "batteryLevel", None) is not None
+
     def diff(self, orig_dev: Any, new_dev: Any, options: Optional[dict] = None) -> dict:
         """The changed §4.2 keys only. Empty dict = nothing to push.
 
@@ -1511,6 +1521,200 @@ class FlowSensorExport(NumericSensorExport):
 
 
 # --------------------------------------------------------------------------
+# Robotic Vacuum Cleaner (ADR-0019)
+# --------------------------------------------------------------------------
+STATE_OPERATIONAL_STATE = "operationalState"
+
+#: States a vacuum plugin most often keeps its status in, in preference order.
+#: Used only when the export declares no ``rvcStateKey``.
+RVC_STATUS_STATE_CANDIDATES = (
+    "status", "state", "workStatus", "work_status", "vacuumStatus", "robotStatus",
+    "cleaningState", "operationalState", "activity", "mode",
+)
+#: …and its battery, when Indigo's own ``batteryLevel`` is absent.
+RVC_BATTERY_STATE_CANDIDATES = (
+    "battery", "batteryLevel", "battery_level", "batteryPercent", "battery_percentage",
+    "electricity_left", "residual_electricity",
+)
+
+#: §4.2's own spellings, which pass straight through.
+RVC_OPERATIONAL_STATES = ("stopped", "running", "paused", "error", "seekingCharger", "charging", "docked")
+
+#: Status text → §4.2 ``operationalState``, as ``(needles, state)`` checked IN
+#: ORDER against the lowercased text with everything but letters removed.
+#:
+#: Order is the whole design. "charge done" must be docked before "charg" can
+#: call it charging; "go to charge" / "returning" must be heading home before
+#: "charg" or "dock" claim it; an error word wins over everything, because a
+#: vacuum stuck mid-clean reports both. The needles cover the vocabularies of
+#: Tuya (``goto_charge``, ``charge_done``, ``smart_clean``…) and the common
+#: Roomba/Roborock/Ecovacs/Dreame wordings; anything unrecognised publishes
+#: NOTHING rather than a guess.
+_RVC_STATUS_TABLE = (
+    (("error", "fault", "stuck", "trapped", "alarm", "malfunction"), "error"),
+    (("gotocharge", "gotodock", "gohome", "goinghome", "return", "backtodock", "backtobase",
+      "backcharge", "seekingcharger", "seekcharge", "docking", "homing"), "seekingCharger"),
+    (("chargedone", "chargecomplete", "fullycharged", "chargefull", "docked", "ondock",
+      "atbase", "athome"), "docked"),
+    (("charg",), "charging"),
+    (("pause",), "paused"),
+    (("clean", "sweep", "mop", "vacuum", "running", "run", "work", "spot", "zone", "edge",
+      "wall", "smart", "auto", "reposition", "mapping", "gotopos"), "running"),
+    (("standby", "idle", "stop", "sleep", "ready", "arrived", "off", "done", "finish", "dock"),
+     "stopped"),
+)
+
+
+def rvc_operational_state_of(value: Any) -> Optional[str]:
+    """Map a vacuum plugin's status value to §4.2 ``operationalState``.
+
+    A boolean is read as "cleaning or not" (True → ``running``, False →
+    ``stopped``) — the shape of a plugin that exposes a vacuum as an on/off
+    device. A string goes through :data:`_RVC_STATUS_TABLE`. Anything else, or
+    an unrecognised string, is ``None``: §3.4 maps are partial, and publishing a
+    guessed state about a physical machine is worse than publishing nothing.
+    """
+    if isinstance(value, bool):
+        return "running" if value else "stopped"
+    if not isinstance(value, str):
+        return None
+    if value in RVC_OPERATIONAL_STATES:
+        return value
+    text = "".join(ch for ch in value.lower() if ch.isalpha())
+    if not text:
+        return None
+    for needles, state in _RVC_STATUS_TABLE:
+        if any(needle in text for needle in needles):
+            return state
+    return None
+
+
+def _state_value(dev: Any, key: str) -> Any:
+    try:
+        return dict(getattr(dev, "states", None) or {}).get(key, _MISSING)
+    except Exception:  # pylint: disable=broad-except
+        return _MISSING
+
+
+class _BatteryReading:
+    """A minimal device stand-in so :func:`battery_percent` can judge a state value."""
+
+    def __init__(self, dev_id: Any, name: Any, value: Any) -> None:
+        self.id = dev_id
+        self.name = name
+        self.batteryLevel = value
+
+
+class RoboticVacuumExport(ExportHandler):
+    """``roboticVacuumCleaner`` — the vacuum on its own Matter node (ADR-0019).
+
+    Indigo has no vacuum device class, so this role is driven by what the
+    export declares:
+
+    * **status** — ``rvcStateKey`` names the state carrying it; without one,
+      the first of :data:`RVC_STATUS_STATE_CANDIDATES` the device has; without
+      that, a relay-shaped device's ``onState`` (on = cleaning).
+    * **battery** — Indigo's own ``batteryLevel`` when present (the shared
+      :meth:`published_states` path), else ``rvcBatteryKey``, else the first
+      of :data:`RVC_BATTERY_STATE_CANDIDATES`.
+    * **commands** — each runs the Indigo ACTION GROUP the export names for
+      it. Action groups rather than a plugin's own actions because they are
+      the one thing every vacuum plugin can be driven through, and the user
+      can put whatever their plugin needs inside one. A relay-shaped device
+      with no ``start``/``stop`` group falls back to on/off; ``resume`` with
+      no group of its own reuses ``start``'s — on every vacuum seen, "carry
+      on" and "go" are the same instruction.
+
+    Never auto-confirms (PRD §7): a command runs the action group and
+    returns; what ecosystems see moves only when the status state does.
+    """
+
+    role = "roboticVacuumCleaner"
+
+    def _status_key(self, dev: Any, options: Optional[dict]) -> Optional[str]:
+        declared = (options or {}).get(export_catalog.OPTION_RVC_STATE_KEY)
+        if isinstance(declared, str) and declared:
+            return declared
+        for key in RVC_STATUS_STATE_CANDIDATES:
+            if _state_value(dev, key) is not _MISSING:
+                return key
+        return None
+
+    def states_for(self, dev: Any, options: Optional[dict] = None) -> dict:
+        key = self._status_key(dev, options)
+        if key is not None:
+            value = _state_value(dev, key)
+            state = None if value is _MISSING else rvc_operational_state_of(value)
+        elif getattr(dev, "supportsOnState", False) is True:
+            state = rvc_operational_state_of(getattr(dev, "onState", None))
+        else:
+            state = None
+        return {} if state is None else {STATE_OPERATIONAL_STATE: state}
+
+    def _battery_state(self, dev: Any, options: Optional[dict]) -> Any:
+        declared = (options or {}).get(export_catalog.OPTION_RVC_BATTERY_KEY)
+        keys = (declared,) if isinstance(declared, str) and declared else RVC_BATTERY_STATE_CANDIDATES
+        for key in keys:
+            value = _state_value(dev, key)
+            if value is not _MISSING:
+                return value
+        return _MISSING
+
+    def published_states(self, dev: Any, options: Optional[dict] = None) -> dict:
+        states = super().published_states(dev, options)
+        if STATE_BATTERY_LEVEL in states:
+            return states
+        value = self._battery_state(dev, options)
+        if value is _MISSING:
+            return states
+        # Same rules as Indigo's own batteryLevel (round, clamp, suppress ≤0),
+        # via a stand-in so there is ONE implementation of them.
+        percent = battery_percent(_BatteryReading(getattr(dev, "id", 0), getattr(dev, "name", ""), value))
+        return states if percent is None else {**states, STATE_BATTERY_LEVEL: percent}
+
+    def has_battery(self, dev: Any, options: Optional[dict] = None) -> bool:
+        if super().has_battery(dev, options):
+            return True
+        value = self._battery_state(dev, options)
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+    def commands(self) -> dict[str, Callable[[dict, Any, dict], Optional[str]]]:
+        return {
+            command: (lambda _args, dev, options, command=command: self._run(command, dev, options))
+            for command in export_catalog.RVC_ACTION_OPTIONS
+        }
+
+    @staticmethod
+    def action_group_for(command: str, options: Optional[dict]) -> Optional[int]:
+        """The action group ``command`` runs, honouring ``resume`` → ``start``."""
+        options = options or {}
+        for name in ((command, "start") if command == "resume" else (command,)):
+            value = options.get(export_catalog.RVC_ACTION_OPTIONS[name])
+            if isinstance(value, bool):
+                continue
+            try:
+                group = int(value)
+            except (TypeError, ValueError):
+                continue
+            if group > 0:
+                return group
+        return None
+
+    def _run(self, command: str, dev: Any, options: dict) -> Optional[str]:
+        group = self.action_group_for(command, options)
+        if group is not None:
+            indigo.actionGroup.execute(group)
+            return None
+        if command in ("start", "stop") and getattr(dev, "supportsOnState", False) is True:
+            (indigo.device.turnOn if command == "start" else indigo.device.turnOff)(dev)
+            return None
+        # A lawful no-op with a reason: the user pressed the button in their
+        # ecosystem and deserves to be told why nothing moved.
+        return (f"no action group is chosen for {command!r} on this vacuum — choose one in "
+                "Manage Matter Exports…")
+
+
+# --------------------------------------------------------------------------
 # Registry
 # --------------------------------------------------------------------------
 #: role → handler. **The whole §4.2 v1 enum, as of E4.** The zoo test pins that
@@ -1538,6 +1742,7 @@ HANDLERS: dict[str, ExportHandler] = {
         PressureSensorExport(),
         FlowSensorExport(),
         ThermostatExport(),
+        RoboticVacuumExport(),
     )
 }
 

@@ -77,6 +77,10 @@ ROLE_LIGHT_SENSOR = "lightSensor"
 ROLE_PRESSURE_SENSOR = "pressureSensor"
 ROLE_FLOW_SENSOR = "flowSensor"
 ROLE_THERMOSTAT = "thermostat"
+#: ADR-0019 — the one STANDALONE role: published as its own Matter node with
+#: its own pairing code, never under the bridge (Apple Home and Alexa cannot
+#: drive a bridged vacuum).
+ROLE_ROBOTIC_VACUUM = "roboticVacuumCleaner"
 
 #: Human labels for the role picker. Keyed by the §4.2 role name.
 #:
@@ -109,6 +113,10 @@ ROLE_LABELS = {
     ROLE_PRESSURE_SENSOR: "Pressure sensor",
     ROLE_FLOW_SENSOR: "Flow sensor",
     ROLE_THERMOSTAT: "Thermostat",
+    # "own pairing code" is part of the label on purpose: this is the one role
+    # whose accessory is NOT added by pairing the bridge, and a user who picks
+    # it needs to know that before they go looking for it in Apple Home.
+    ROLE_ROBOTIC_VACUUM: "Robot vacuum (paired separately)",
 }
 
 # --------------------------------------------------------------------------
@@ -156,6 +164,87 @@ OPTION_STATE_KEY = "stateKey"
 #: Companion to :data:`OPTION_STATE_KEY`: the device reports the opposite sense
 #: (an alarm zone whose boolean is true when *healthy*, say).
 OPTION_STATE_INVERT = "stateInvert"
+
+#: ``options`` keys for ``roboticVacuumCleaner`` (ADR-0019). An Indigo vacuum
+#: has no device class of its own, so everything the role needs is declared:
+#: which state carries its status, which (optionally) its battery, and which
+#: action group each Matter command runs. Their PRESENCE on an entry is also
+#: what keeps a declared vacuum exportable after a rename that would defeat
+#: :func:`looks_like_vacuum` — eligibility by declaration, as ADR-0012 does for
+#: mapped sensors.
+OPTION_RVC_STATE_KEY = "rvcStateKey"
+OPTION_RVC_BATTERY_KEY = "rvcBatteryKey"
+#: §4.2 command → the ``options`` key holding the action group it runs.
+RVC_ACTION_OPTIONS = {
+    "start": "rvcActionStart",
+    "stop": "rvcActionStop",
+    "pause": "rvcActionPause",
+    "resume": "rvcActionResume",
+    "goHome": "rvcActionGoHome",
+}
+RVC_OPTION_KEYS = (OPTION_RVC_STATE_KEY, OPTION_RVC_BATTERY_KEY, *RVC_ACTION_OPTIONS.values())
+
+#: Evidence a device is a robot vacuum, as **regexes**. Two haystacks with two
+#: bars, the shape of the binary-role name table: the identity strings (name,
+#: model, device type, owning plugin) may name the product, and state KEYS may
+#: name a vacuum-only concept. State keys deliberately exclude generic words —
+#: a dishwasher has a ``cleaning`` state and a washing machine a ``mode`` —
+#: because a hit makes the vacuum the DEFAULT role in the picker.
+_VACUUM_IDENTITY_RE = re.compile(
+    r"vacuum|robovac|roomba|roborock|dreame|deebot|ecovacs|neato|\brvc\b|robot", re.IGNORECASE)
+#: "Hoover" is how a lot of British households say vacuum — and also a brand of
+#: washing machine, and "robot" is also a lawn mower. A name that says it
+#: washes, dries or mows is never taken for a vacuum, whatever else matches.
+_HOOVER_RE = re.compile(r"\bhoover", re.IGNORECASE)
+_NOT_A_VACUUM_RE = re.compile(r"wash|dry|dryer|mow|lawn", re.IGNORECASE)
+_VACUUM_STATE_RE = re.compile(r"suction|sweep|\bmop|cistern|robot", re.IGNORECASE)
+
+
+def looks_like_vacuum(dev) -> bool:
+    """True when ``dev``'s identity or its state keys say it is a robot vacuum.
+
+    A heuristic for the picker only — it decides whether the vacuum role is
+    OFFERED (and offered first). It never decides anything about an existing
+    export: that is the ``rvc*`` options' job (see :data:`RVC_OPTION_KEYS`).
+    Never raises; an unreadable device is simply not a vacuum.
+    """
+    try:
+        name = str(getattr(dev, "name", "") or "")
+        if _NOT_A_VACUUM_RE.search(name):
+            return False
+        identity = " ".join(str(getattr(dev, attr, "") or "")
+                            for attr in ("name", "model", "subModel", "deviceTypeId", "pluginId"))
+        if _VACUUM_IDENTITY_RE.search(identity) or _HOOVER_RE.search(name):
+            return True
+        states = dict(getattr(dev, "states", None) or {})
+        return any(_VACUUM_STATE_RE.search(str(key)) for key in states)
+    except Exception:  # pylint: disable=broad-except
+        return False
+
+
+def _rvc_declared(options) -> bool:
+    return isinstance(options, dict) and any(key in options for key in RVC_OPTION_KEYS)
+
+
+def _with_vacuum(verdict, dev, options):
+    """Add the vacuum role to ``verdict`` when the device is (or was declared) one.
+
+    First and default, because a device that looks like a vacuum is one: an
+    Indigo plugin exposing a vacuum as a relay is modelling start/stop, not a
+    plug. A device that would otherwise be unexportable (a custom device whose
+    only states are strings, which is what most vacuum plugins produce) becomes
+    exportable as a vacuum alone; one the user could map as a binary sensor
+    is offered as a vacuum instead, since that is what it is.
+    """
+    if not (_rvc_declared(options) or looks_like_vacuum(dev)):
+        return verdict
+    if isinstance(verdict, EligibleDevice):
+        return EligibleDevice(
+            eligible_roles=_default_first([ROLE_ROBOTIC_VACUUM, *verdict.eligible_roles], ROLE_ROBOTIC_VACUUM),
+            default_role=ROLE_ROBOTIC_VACUUM,
+        )
+    return EligibleDevice(eligible_roles=(ROLE_ROBOTIC_VACUUM,), default_role=ROLE_ROBOTIC_VACUUM)
+
 
 #: Preference order for :func:`binary_state_keys`. Anything unlisted sorts
 #: after these, alphabetically.
@@ -417,9 +506,8 @@ def classify(dev, plugin_id: str = DEFAULT_PLUGIN_ID, options: Optional[dict] = 
         if _plugin_id_of(dev) == plugin_id:
             return Excluded(REASON_LOOP_GUARD)
         handler = _BY_KIND.get(device_kind(dev))
-        if handler is None:
-            return _custom(dev, options)
-        return handler(dev, options)
+        verdict = _custom(dev, options) if handler is None else handler(dev, options)
+        return _with_vacuum(verdict, dev, options)
     except Exception as exc:  # pylint: disable=broad-except
         # _PLUGIN_LOG — see its module-level comment. This error is the only
         # account of why a device was excluded; a module logger here would

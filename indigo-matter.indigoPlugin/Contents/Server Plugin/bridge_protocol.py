@@ -66,12 +66,17 @@ CMD_OPEN_WINDOW = "open_commissioning_window"
 CMD_REMOVE_FABRIC = "remove_fabric"
 CMD_FACTORY_RESET = "factory_reset"
 CMD_REBUILD_ENDPOINT_MAP = "rebuild_endpoint_map"
+#: §3.12 (ADR-0019) — a standalone accessory's own pairing, named by device.
+CMD_GET_STANDALONE_PAIRING = "get_standalone_pairing"
+CMD_OPEN_STANDALONE_WINDOW = "open_standalone_window"
+CMD_RESET_STANDALONE = "reset_standalone"
 
 #: The complete §3 command domain. Anything else gets ``unknown_command``.
 COMMANDS = frozenset({
     CMD_ATTACH, CMD_UPSERT_ENDPOINT, CMD_REMOVE_ENDPOINT, CMD_SET_STATE, CMD_SET_REACHABLE,
     CMD_GET_STATUS, CMD_GET_PAIRING, CMD_OPEN_WINDOW, CMD_REMOVE_FABRIC, CMD_FACTORY_RESET,
-    CMD_REBUILD_ENDPOINT_MAP,
+    CMD_REBUILD_ENDPOINT_MAP, CMD_GET_STANDALONE_PAIRING, CMD_OPEN_STANDALONE_WINDOW,
+    CMD_RESET_STANDALONE,
 })
 
 # attach args (§3.1)
@@ -189,6 +194,10 @@ ROLE_STATE_KEYS = {
     "pressureSensor": ("pressureKPa",),
     "flowSensor": ("flowM3h",),
     "thermostat": ("localTemperatureC", "heatingSetpointC", "coolingSetpointC", "systemMode"),
+    # ADR-0019 — the one STANDALONE role: published as its own Matter node,
+    # never a bridged child (Apple Home and Alexa cannot handle a bridged
+    # vacuum). One reading; the node derives RVC Run Mode from it.
+    "roboticVacuumCleaner": ("operationalState",),
 }
 
 #: ``set_state`` keys valid for ANY role whose export carries ``battery: true``
@@ -228,11 +237,56 @@ ROLE_COMMANDS = {
     "pressureSensor": (),
     "flowSensor": (),
     "thermostat": ("setHeatingSetpoint", "setCoolingSetpoint", "setSystemMode"),
+    # `stop` is Matter's "change to Idle": stop where you are. Going back to
+    # the dock is `goHome`, a separate command on a separate cluster.
+    "roboticVacuumCleaner": ("start", "stop", "pause", "resume", "goHome"),
 }
 
 #: The v1 role enum (§4.2) — derived, so a role can only exist with both of its
 #: vocabularies declared. This set is what the allow-list validates against.
 ROLES = frozenset(ROLE_STATE_KEYS)
+
+#: ADR-0019 — roles the node publishes as their OWN Matter node, with their own
+#: pairing code (§3.12), rather than under the bridge's aggregator.
+STANDALONE_ROLES = frozenset({"roboticVacuumCleaner"})
+
+#: §4.2 ``roboticVacuumCleaner`` — the ``operationalState`` domain.
+RVC_OPERATIONAL_STATES = (
+    "stopped", "running", "paused", "error", "seekingCharger", "charging", "docked",
+)
+
+#: The first bridge-node release that understands :data:`STANDALONE_ROLES`. An
+#: older node refuses the whole ``attach`` over an unknown role, which would
+#: take EVERY export offline; ``export_bridge`` withholds standalone specs from
+#: a node older than this instead.
+STANDALONE_MIN_BRIDGE_VERSION = (0, 18, 0)
+
+
+def is_standalone_role(role: str) -> bool:
+    """True for a role published as its own Matter node (ADR-0019)."""
+    return role in STANDALONE_ROLES
+
+
+def bridge_version_tuple(version: Any) -> Optional[tuple]:
+    """``"0.18.0"`` → ``(0, 18, 0)``; ``None`` for anything unparseable.
+
+    Pre-release and build suffixes are dropped (``0.18.0-rc.1`` → ``(0, 18, 0)``)
+    — a release candidate of the version that added a feature has the feature.
+    """
+    if not isinstance(version, str):
+        return None
+    core = re.split(r"[-+]", version.strip(), maxsplit=1)[0]
+    parts = core.split(".")
+    if len(parts) != 3 or not all(part.isdigit() for part in parts):
+        return None
+    return tuple(int(part) for part in parts)
+
+
+def supports_standalone(bridge_version: Any) -> bool:
+    """Whether a node reporting ``bridge_version`` can host standalone roles."""
+    parsed = bridge_version_tuple(bridge_version)
+    return parsed is not None and parsed >= STANDALONE_MIN_BRIDGE_VERSION
+
 
 #: The v1 ``systemMode`` domain, in both directions (§4.2).
 SYSTEM_MODES = ("off", "heat", "cool", "auto")
@@ -412,6 +466,18 @@ class EndpointSummary:
 
 
 @dataclass
+class StandaloneSummary:
+    """One standalone accessory's own node, as §4.3 ``standalone[]`` reports it."""
+    indigo_device_id: int
+    role: str
+    published_as: str
+    port: int
+    online: bool
+    commissioned: bool
+    fabrics: list = field(default_factory=list)
+
+
+@dataclass
 class DriftEntry:
     """A ``UniqueID → endpointNumber`` mapping that moved (§4.3, PRD §4.3).
 
@@ -548,6 +614,10 @@ class StatusReport:
     #: from an older node — which never sends this field — parses as
     #: ``checked=False``: it never looked, which is "unknown", never "healthy".
     session_hygiene: SessionHygiene = field(default_factory=SessionHygiene)
+    #: §4.3, ADR-0019 — standalone accessories (one Matter node each). Never
+    #: counted in ``endpoint_count``/``endpoints``. Defaulted so a report from
+    #: a pre-0.18 node — which has none — parses as an empty list.
+    standalone: list = field(default_factory=list)
 
 
 @dataclass
@@ -680,7 +750,31 @@ def parse_status(result: Any) -> StatusReport:
         warnings=[str(item) for item in (data.get("warnings") or [])],
         subscription_churn=parse_subscription_churn(data.get("subscriptionChurn")),
         session_hygiene=parse_session_hygiene(data.get("sessionHygiene")),
+        standalone=parse_standalone(data.get("standalone")),
     )
+
+
+def parse_standalone(data: Any) -> list:
+    """§4.3 ``standalone[]``, tolerantly: a malformed entry is dropped, not fatal.
+
+    Absent (a pre-0.18 node) is ``[]``. Like ``parse_fabrics``, one bad entry
+    must not cost the whole ``get_status`` — this is read by the watchdog tick.
+    """
+    result = []
+    for item in data if isinstance(data, list) else []:
+        try:
+            result.append(StandaloneSummary(
+                indigo_device_id=int(item[ARG_INDIGO_DEVICE_ID]),
+                role=str(item.get("role", "")),
+                published_as=str(item.get(ARG_PUBLISHED_AS, "") or ""),
+                port=int(item.get("port", 0)),
+                online=bool(item.get("online", False)),
+                commissioned=bool(item.get("commissioned", False)),
+                fabrics=parse_fabrics(item.get("fabrics")),
+            ))
+        except (KeyError, TypeError, ValueError, AttributeError):
+            continue
+    return result
 
 
 def parse_drift(data: Any) -> list:
@@ -961,6 +1055,27 @@ class BridgeProtocol:
     def build_rebuild_endpoint_map(self, message_id: Optional[str] = None) -> dict:
         """§3.11 — adopt the live endpoint numbers as the new persisted map."""
         return self.build_request(CMD_REBUILD_ENDPOINT_MAP, None, message_id)
+
+    def build_get_standalone_pairing(self, indigo_device_id: int,
+                                     message_id: Optional[str] = None) -> dict:
+        """§3.12 — a standalone accessory's own pairing state and codes."""
+        return self.build_request(CMD_GET_STANDALONE_PAIRING,
+                                  {ARG_INDIGO_DEVICE_ID: int(indigo_device_id)}, message_id)
+
+    def build_open_standalone_window(self, indigo_device_id: int,
+                                     duration_seconds: int = DEFAULT_WINDOW_SECONDS,
+                                     message_id: Optional[str] = None) -> dict:
+        """§3.12 — an enhanced window on a PAIRED standalone accessory's own node."""
+        return self.build_request(
+            CMD_OPEN_STANDALONE_WINDOW,
+            {ARG_INDIGO_DEVICE_ID: int(indigo_device_id), ARG_DURATION_SECONDS: int(duration_seconds)},
+            message_id,
+        )
+
+    def build_reset_standalone(self, indigo_device_id: int, message_id: Optional[str] = None) -> dict:
+        """§3.12 — unpair a standalone accessory everywhere; it re-advertises under new codes."""
+        return self.build_request(CMD_RESET_STANDALONE, {ARG_INDIGO_DEVICE_ID: int(indigo_device_id)},
+                                  message_id)
 
     # ------------------------------------------------------------------
     # Inbound classification

@@ -127,6 +127,9 @@ MENU_SECTIONS = [
     # 2 · Matter devices Indigo publishes
     ["Manage Matter Exports…",
      "Pair Matter Bridge…",
+     # ADR-0019 — a vacuum is its own accessory with its own code, so it
+     # sits beside the bridge's pairing item rather than inside it.
+     "Pair Matter Vacuum…",
      "Unpair an Ecosystem…"],
     # 3 · the Matter controller (matter-server)
     ["Install/update the Matter controller (matter-server)",

@@ -403,6 +403,59 @@ A Matter pairing code is not durable: once used, or once the window expires (up 
                 <Label>Invert position (0% = open):</Label>
                 <Description>Matter's convention is 100% = fully open. Tick this if your Indigo device is the other way round.</Description>
             </Field>
+            <!-- Robot vacuum (ADR-0019). Indigo has no vacuum device class, so
+                 the export declares where its status and battery live and which
+                 action group each Matter command runs. Blank = automatic /
+                 none. export_dialog_mixin.RVC_ACTION_FIELDS names the five. -->
+            <Field id="exportRvcHelp" type="label" fontColor="darkgray"
+                   visibleBindingId="exportRole" visibleBindingValue="roboticVacuumCleaner"
+                   alwaysUseInDialogHeightCalc="true">
+                <Label>A robot vacuum is published as its OWN Matter accessory (Apple Home and Alexa cannot use one behind a bridge). After adding it here, pair it with Plugins ▸ Matter ▸ Pair Matter Vacuum… — pairing the bridge does not add it.</Label>
+            </Field>
+            <Field id="exportRvcStateKey" type="menu" defaultValue=""
+                   visibleBindingId="exportRole" visibleBindingValue="roboticVacuumCleaner"
+                   alwaysUseInDialogHeightCalc="true">
+                <Label>Status state:</Label>
+                <List class="self" method="getExportRvcStateKeys" dynamicReload="true"/>
+                <Description>Where the vacuum reports what it is doing (cleaning, docked, charging…).</Description>
+            </Field>
+            <Field id="exportRvcBatteryKey" type="menu" defaultValue=""
+                   visibleBindingId="exportRole" visibleBindingValue="roboticVacuumCleaner"
+                   alwaysUseInDialogHeightCalc="true">
+                <Label>Battery state:</Label>
+                <List class="self" method="getExportRvcBatteryKeys" dynamicReload="true"/>
+            </Field>
+            <Field id="exportRvcStart" type="menu" defaultValue=""
+                   visibleBindingId="exportRole" visibleBindingValue="roboticVacuumCleaner"
+                   alwaysUseInDialogHeightCalc="true">
+                <Label>Start runs:</Label>
+                <List class="self" method="getExportActionGroups" dynamicReload="true"/>
+            </Field>
+            <Field id="exportRvcStop" type="menu" defaultValue=""
+                   visibleBindingId="exportRole" visibleBindingValue="roboticVacuumCleaner"
+                   alwaysUseInDialogHeightCalc="true">
+                <Label>Stop runs:</Label>
+                <List class="self" method="getExportActionGroups" dynamicReload="true"/>
+            </Field>
+            <Field id="exportRvcPause" type="menu" defaultValue=""
+                   visibleBindingId="exportRole" visibleBindingValue="roboticVacuumCleaner"
+                   alwaysUseInDialogHeightCalc="true">
+                <Label>Pause runs:</Label>
+                <List class="self" method="getExportActionGroups" dynamicReload="true"/>
+            </Field>
+            <Field id="exportRvcResume" type="menu" defaultValue=""
+                   visibleBindingId="exportRole" visibleBindingValue="roboticVacuumCleaner"
+                   alwaysUseInDialogHeightCalc="true">
+                <Label>Resume runs:</Label>
+                <List class="self" method="getExportActionGroups" dynamicReload="true"/>
+                <Description>Leave as none to use the Start action group.</Description>
+            </Field>
+            <Field id="exportRvcGoHome" type="menu" defaultValue=""
+                   visibleBindingId="exportRole" visibleBindingValue="roboticVacuumCleaner"
+                   alwaysUseInDialogHeightCalc="true">
+                <Label>Return to dock runs:</Label>
+                <List class="self" method="getExportActionGroups" dynamicReload="true"/>
+            </Field>
             <Field id="exportAdd" type="button">
                 <Label></Label>
                 <Title>Add / update export</Title>
@@ -459,6 +512,35 @@ The bridge only runs while at least one device is exported, so add something in 
             </Field>
         </ConfigUI>
     </MenuItem>
+    <!--
+        Pair a robot vacuum (ADR-0019, BRIDGE_PROTOCOL §3.12). A vacuum is its
+        own Matter node with its own code, so it needs its own pairing menu;
+        same event-log channel and the same three cases as Pair Matter Bridge.
+    -->
+    <MenuItem id="pairMatterVacuum">
+        <Name>Pair Matter Vacuum…</Name>
+        <CallbackMethod>menuPairMatterVacuum</CallbackMethod>
+        <ButtonTitle>Show pairing code</ButtonTitle>
+        <ConfigUI>
+            <Field id="vacuumIntro" type="label">
+                <Label>A robot vacuum is exported as its own Matter accessory, not as part of the bridge, so it has its own pairing code. The code (and a link to a QR page) is written to the Indigo EVENT LOG.
+
+If the vacuum has never been paired, its original code is shown. Once paired, a new window is opened for each further ecosystem.</Label>
+            </Field>
+            <Field id="vacuumDevice" type="menu">
+                <Label>Vacuum:</Label>
+                <List class="self" method="getStandaloneExports" dynamicReload="true"/>
+            </Field>
+            <Field id="duration" type="textfield" defaultValue="900">
+                <Label>Window stays open for (seconds):</Label>
+                <Description>Matter allows 180 to 900 (3 to 15 minutes).</Description>
+            </Field>
+            <Field id="vacuumReset" type="checkbox" defaultValue="false">
+                <Label>Unpair everywhere first:</Label>
+                <Description>Removes the vacuum from EVERY ecosystem it is paired with and gives it new codes. Use this if it was paired somewhere you no longer control.</Description>
+            </Field>
+        </ConfigUI>
+    </MenuItem>
     <MenuItem id="unpairEcosystem">
         <Name>Unpair an Ecosystem…</Name>
         <CallbackMethod>menuUnpairEcosystem</CallbackMethod>
@@ -483,6 +565,7 @@ If you unpair the LAST ecosystem the bridge resets itself completely and starts 
             </Field>
         </ConfigUI>
     </MenuItem>
+
 
     <MenuItem id="sepExportFromServer"/>
 

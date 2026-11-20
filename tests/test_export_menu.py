@@ -2732,3 +2732,82 @@ def test_polarity_applies_to_a_plain_onstate_sensor(plug, devices):
     handler = export_handlers.handler_for("contactSensor")
     assert handler.states_for(dev, {}) == {"contact": False}
     assert handler.states_for(dev, {"stateInvert": True}) == {"contact": True}
+
+
+# ---------------------------------------------------------------------------
+# Robot vacuum fields (ADR-0019)
+# ---------------------------------------------------------------------------
+VACUUM = 900021
+RVC_FIELDS = ("exportRvcStateKey", "exportRvcBatteryKey", "exportRvcStart", "exportRvcStop",
+              "exportRvcPause", "exportRvcResume", "exportRvcGoHome")
+
+
+@pytest.fixture
+def vacuum(devices):
+    from fakes import CustomDevice
+    dev = CustomDevice(VACUUM, "Hallway Vacuum", plugin_id="com.racarter.indigoplugin.tuya",
+                       states={"status": "charge_done", "suction": "strong", "electricity_left": 90})
+    devices.add(dev)
+    return dev
+
+
+def _rvc_values(device=VACUUM, **kwargs):
+    return _values(**{"exportDevice": str(device), **{field: "" for field in RVC_FIELDS}, **kwargs})
+
+
+@pytest.mark.parametrize("field_id", ("exportRvcHelp",) + RVC_FIELDS)
+def test_vacuum_fields_are_visible_only_for_the_vacuum_role(field_id):
+    field = _menu_item().find(f".//Field[@id='{field_id}']")
+    assert field is not None
+    assert field.get("visibleBindingId") == "exportRole"
+    assert field.get("visibleBindingValue") == "roboticVacuumCleaner"
+    assert field.get("alwaysUseInDialogHeightCalc") == "true"
+
+
+def test_the_vacuum_is_offered_as_the_default_role(plug, vacuum):  # noqa: ARG001
+    values = plug.exportDeviceChanged(_rvc_values())
+    assert values["exportRole"] == "roboticVacuumCleaner"
+    assert all(values[field] == "" for field in RVC_FIELDS), "a new export starts on automatic"
+
+
+def test_the_state_menus_list_the_right_kinds_of_state(plug, vacuum):  # noqa: ARG001
+    states = dict(plug.getExportRvcStateKeys(valuesDict=_rvc_values()))
+    battery = dict(plug.getExportRvcBatteryKeys(valuesDict=_rvc_values()))
+    assert "" in states and "status" in states and "electricity_left" not in states
+    assert "" in battery and "electricity_left" in battery and "status" not in battery
+
+
+def test_the_action_group_menu_offers_none_first(plug, mock_indigo_base):
+    mock_indigo_base.actionGroups = [Mock(id=12, name="Vacuum: dock"), Mock(id=11, name="Vacuum: clean")]
+    for group in mock_indigo_base.actionGroups:
+        group.name = {12: "Vacuum: dock", 11: "Vacuum: clean"}[group.id]
+    rows = plug.getExportActionGroups()
+    assert rows == [("", "— none —"), ("11", "Vacuum: clean"), ("12", "Vacuum: dock")]
+
+
+def test_saving_a_vacuum_stores_only_what_was_chosen(plug, vacuum):  # noqa: ARG001
+    values = plug.exportAddOrUpdate(_rvc_values(
+        exportRole="roboticVacuumCleaner", exportRvcStateKey="status",
+        exportRvcStart="11", exportRvcStop="12", exportRvcGoHome="13"))
+    entry = plug.exports.get(VACUUM)
+    assert entry.role == "roboticVacuumCleaner"
+    assert entry.options == {"rvcStateKey": "status", "rvcActionStart": 11,
+                             "rvcActionStop": 12, "rvcActionGoHome": 13}
+    status = values["exportStatus"]
+    assert "Pair Matter Vacuum" in status
+    assert "pause" in status and "goHome" not in status, "names only the commands left without a group"
+
+
+def test_reopening_a_saved_vacuum_shows_its_choices(plug, vacuum):  # noqa: ARG001
+    plug.exportAddOrUpdate(_rvc_values(exportRole="roboticVacuumCleaner",
+                                       exportRvcBatteryKey="electricity_left", exportRvcPause="14"))
+    values = plug.exportDeviceChanged(_rvc_values())
+    assert values["exportRvcBatteryKey"] == "electricity_left"
+    assert values["exportRvcPause"] == "14"
+    assert values["exportRvcStart"] == ""
+
+
+def test_vacuum_options_never_ride_along_on_another_role(plug, vacuum):  # noqa: ARG001
+    """A stale action group on screen must not be saved onto, say, a plug."""
+    plug.exportAddOrUpdate(_rvc_values(device=101, exportRole="onOffPlugInUnit", exportRvcStart="11"))
+    assert plug.exports.get(101).options == {}

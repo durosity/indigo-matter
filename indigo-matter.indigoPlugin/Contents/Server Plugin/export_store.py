@@ -106,6 +106,14 @@ OPTION_CT_LEARNED_MAX_MIREDS = ct_bounds.OPTION_CT_LEARNED_MAX_MIREDS
 #: colour temperature to bound.
 CT_BOUNDS_ROLES = tuple(ct_bounds.CT_ROLES)
 
+#: ``options`` keys for the robot vacuum (ADR-0019) — status/battery state
+#: names (non-empty strings) and one Indigo action-group id per command
+#: (positive ints). See ``export_catalog.RVC_OPTION_KEYS``.
+OPTION_RVC_STATE_KEY = export_catalog.OPTION_RVC_STATE_KEY
+OPTION_RVC_BATTERY_KEY = export_catalog.OPTION_RVC_BATTERY_KEY
+RVC_ACTION_OPTION_KEYS = tuple(export_catalog.RVC_ACTION_OPTIONS.values())
+RVC_ROLES = (export_catalog.ROLE_ROBOTIC_VACUUM,)
+
 #: The message the dialog shows when the whole blob was unreadable (S3). The
 #: store must never let the UI say "nothing is exported yet" after this.
 LOAD_ERROR_UNREADABLE = ("Export list could not be read — starting empty. "
@@ -155,6 +163,31 @@ def _validate_options(options: dict, role: str, device_id: int) -> None:
                 f"export entry has the {OPTION_STATE_INVERT!r} option on role {role!r}, "
                 f"which reads no boolean state (device {device_id})")
     _validate_ct_bounds(options, role, device_id)
+    _validate_rvc(options, role, device_id)
+
+
+def _validate_rvc(options: dict, role: str, device_id: int) -> None:
+    """The vacuum's keys, per key and per role like everything above.
+
+    An action-group id that rode in on a plug would mean an ecosystem's
+    "turn on" ran somebody's action group — exactly the silent cross-wiring
+    the per-role rule exists to stop.
+    """
+    for key in (OPTION_RVC_STATE_KEY, OPTION_RVC_BATTERY_KEY, *RVC_ACTION_OPTION_KEYS):
+        if key not in options:
+            continue
+        if role not in RVC_ROLES:
+            raise ValueError(
+                f"export entry has the {key!r} option on role {role!r}, which is not a robot "
+                f"vacuum (device {device_id})")
+        value = options[key]
+        if key in RVC_ACTION_OPTION_KEYS:
+            if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+                raise ValueError(
+                    f"export entry {key!r} option is not an action group id (device {device_id})")
+        elif not isinstance(value, str) or not value:
+            raise ValueError(
+                f"export entry {key!r} option is not a non-empty string (device {device_id})")
 
 
 def _validate_ct_bounds(options: dict, role: str, device_id: int) -> None:

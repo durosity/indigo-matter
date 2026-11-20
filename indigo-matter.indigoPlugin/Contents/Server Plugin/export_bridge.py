@@ -1100,6 +1100,7 @@ class ExportBridge:
         return len(self._store.all())
 
     def _spec_for(self, entry) -> Optional[EndpointSpec]:
+        # pylint: disable=too-many-return-statements
         """One §4.1 ``EndpointSpec``, or ``None`` with a warning."""
         device_id = entry.indigo_device_id
         dev = self._device_getter(device_id)
@@ -1139,6 +1140,17 @@ class ExportBridge:
         if handler is None:
             return self._skip(device_id, f"the role {entry.role!r} is not one this plugin "
                                          "version can bridge")
+        # ADR-0019 — a node older than 0.18.0 does not know the standalone
+        # role, and refuses the WHOLE attach over an unknown role: sending it
+        # would take every other export offline with it. Withholding it here
+        # costs only the vacuum, and only until the node is upgraded; the
+        # node keeps an omitted standalone accessory's pairings (dormant).
+        if bridge_protocol.is_standalone_role(entry.role) and not self._node_supports_standalone():
+            return self._skip(
+                device_id,
+                "the installed Matter bridge node is too old to publish a robot vacuum "
+                f"(it needs indigo-matter-bridge {'.'.join(map(str, bridge_protocol.STANDALONE_MIN_BRIDGE_VERSION))} "
+                "or later)")
         try:
             states = handler.published_states(dev, entry.options)
         except Exception as exc:  # pylint: disable=broad-except
@@ -1182,8 +1194,18 @@ class ExportBridge:
             # value. ADR-0003's evidence rule applied correctly to the same
             # attribute two different ways, on purpose — see `states` above
             # (built from `battery_percent`, which suppresses 0) for the other.
-            battery=getattr(dev, "batteryLevel", None) is not None,
+            battery=handler.has_battery(dev, entry.options),
         )
+
+    def _node_supports_standalone(self) -> bool:
+        """Whether the connected node's handshake says it can host ADR-0019 roles.
+
+        No handshake yet means "not known", which is answered as NO: the cost
+        of a wrong no is one vacuum withheld until the next attach, the cost of
+        a wrong yes is every export refused by an older node.
+        """
+        hello = getattr(self.client, "hello", None)
+        return bridge_protocol.supports_standalone(getattr(hello, "bridge_version", None))
 
     def _skip(self, device_id: int, why: str, detail: str = "") -> None:
         """Warn once per reason, then keep quiet — the provider runs per connect.

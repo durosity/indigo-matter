@@ -742,6 +742,29 @@ class BridgeClient(WsJsonClient):
         result = await self._request_frame(self.proto.build_open_window(duration_seconds), timeout)
         return bridge_protocol.parse_window(result)
 
+    async def get_standalone_pairing(self, indigo_device_id: int,
+                                     timeout: float = DEFAULT_TIMEOUT) -> PairingReport:
+        """§3.12 — a standalone accessory's own pairing state and codes (ADR-0019)."""
+        result = await self._request_frame(self.proto.build_get_standalone_pairing(indigo_device_id), timeout)
+        return bridge_protocol.parse_pairing(result)
+
+    async def open_standalone_window(
+        self,
+        indigo_device_id: int,
+        duration_seconds: int = bridge_protocol.DEFAULT_WINDOW_SECONDS,
+        timeout: float = LONG_TIMEOUT,
+    ) -> CommissioningWindow:
+        """§3.12 — an enhanced window on a PAIRED standalone accessory's own node."""
+        result = await self._request_frame(
+            self.proto.build_open_standalone_window(indigo_device_id, duration_seconds), timeout)
+        return bridge_protocol.parse_window(result)
+
+    async def reset_standalone(self, indigo_device_id: int,
+                               timeout: float = LONG_TIMEOUT) -> PairingReport:
+        """§3.12 — unpair a standalone accessory everywhere; new codes come back."""
+        result = await self._request_frame(self.proto.build_reset_standalone(indigo_device_id), timeout)
+        return bridge_protocol.parse_pairing(result)
+
     async def remove_fabric(self, fabric_index: int,
                             timeout: float = LONG_TIMEOUT) -> bridge_protocol.FabricRemoval:
         """Drop one ecosystem's fabric (§3.9). Returns what the node actually did.

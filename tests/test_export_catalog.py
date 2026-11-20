@@ -146,6 +146,23 @@ ZOO = {
         RelayDevice(18, "Matter Plug", plugin_id=OURS),
         Excluded(export_catalog.REASON_LOOP_GUARD),
     ),
+    # --- Robot vacuum (ADR-0019) -------------------------------------------
+    # The shape most vacuum plugins produce, Tuya's included: a custom device
+    # whose states are strings and numbers, so nothing else could export it.
+    # Its state keys (suction, cistern) are what say "vacuum", not its name.
+    "custom_tuya_vacuum": (
+        CustomDevice(20, "Hallway", states={"status": "charge_done", "suction": "strong",
+                                            "cistern": "low", "electricity_left": 100},
+                     deviceTypeId="tuyaDevice", plugin_id="com.racarter.indigoplugin.tuya"),
+        EligibleDevice(("roboticVacuumCleaner",), "roboticVacuumCleaner"),
+    ),
+    # A relay a plugin uses to model start/stop: offered as a vacuum FIRST,
+    # with the relay roles still there for anyone who really wants a plug.
+    "relay_named_vacuum": (
+        RelayDevice(21, "Landing Vacuum"),
+        EligibleDevice(("roboticVacuumCleaner", "onOffPlugInUnit", "onOffLight", "doorLock"),
+                       "roboticVacuumCleaner"),
+    ),
 }
 
 
@@ -598,3 +615,48 @@ def test_the_occupancy_label_names_motion():
 def test_role_label_falls_back_to_the_role_name():
     assert export_catalog.role_label("onOffLight") == "Light (On/Off)"
     assert export_catalog.role_label("somethingNew") == "somethingNew"
+
+
+# ---------------------------------------------------------------------------
+# Robot vacuum detection (ADR-0019)
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("device", [
+    # British "hoover" for a vacuum counts…
+    RelayDevice(30, "Hallway Hoover"),
+    CustomDevice(31, "Downstairs", model="Roborock S7"),
+    CustomDevice(32, "Robot", states={"status": "idle"}),
+    CustomDevice(33, "Kitchen", states={"mop_mode": "wet"}),
+], ids=["hoover", "roborock-model", "robot-name", "mop-state"])
+def test_looks_like_vacuum(device):
+    assert export_catalog.looks_like_vacuum(device)
+
+
+@pytest.mark.parametrize("device", [
+    # …a Hoover WASHING MACHINE does not, nor a dishwasher whose state is
+    # literally called "cleaning" — a hit makes the vacuum the DEFAULT role,
+    # so the generic words stay out of the state-key table on purpose.
+    RelayDevice(40, "Hoover Washing Machine"),
+    CustomDevice(41, "Dishwasher", states={"cleaning": True, "mode": "eco", "status": "running"}),
+    RelayDevice(42, "Study Plug"),
+    RelayDevice(43, "Robot Mower"),
+], ids=["hoover-washer", "dishwasher", "plug", "robot-mower"])
+def test_does_not_look_like_vacuum(device):
+    assert not export_catalog.looks_like_vacuum(device)
+
+
+def test_an_unreadable_device_is_not_a_vacuum():
+    """The picker walks the whole database; a dying proxy must not raise here."""
+    assert not export_catalog.looks_like_vacuum(fakes.HostileDevice())
+
+
+def test_a_declared_vacuum_stays_exportable_after_a_rename():
+    """Eligibility by declaration (the ADR-0012 shape): once the export carries
+    the vacuum's options, the name heuristic no longer decides anything."""
+    renamed = CustomDevice(50, "Downstairs thing", states={"status": "docked"})
+    assert not export_catalog.looks_like_vacuum(renamed)
+    verdict = classify(renamed, OURS, {export_catalog.OPTION_RVC_STATE_KEY: "status"})
+    assert verdict == EligibleDevice(("roboticVacuumCleaner",), "roboticVacuumCleaner")
+
+
+def test_the_vacuum_label_says_it_pairs_separately():
+    assert "separately" in export_catalog.role_label("roboticVacuumCleaner")

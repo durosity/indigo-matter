@@ -1782,3 +1782,105 @@ class TestInstallExpectedRestartWindow:
         plug._install_bridge_node()
         agent.ensure_installed.assert_not_called()
         bridge.expect_restart.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Pair Matter Vacuum… (ADR-0019, §3.12) — a vacuum has its OWN code
+# ---------------------------------------------------------------------------
+VACUUM = 900021
+
+
+@pytest.fixture
+def vacuum_plug(plug, devices):
+    from fakes import CustomDevice
+    devices.add(CustomDevice(VACUUM, "Hallway Vacuum", states={"status": "charge_done"}))
+    plug.exports.upsert(ExportEntry(VACUUM, "roboticVacuumCleaner"))
+    return plug
+
+
+class TestPairMatterVacuum:
+    def _values(self, **overrides):
+        return {"vacuumDevice": str(VACUUM), "duration": "900", "vacuumReset": False, **overrides}
+
+    def test_the_menu_lists_only_standalone_exports(self, vacuum_plug):
+        assert vacuum_plug.getStandaloneExports() == [(str(VACUUM), "Hallway Vacuum")]
+
+    def test_the_menu_says_so_when_no_vacuum_is_exported(self, plug):
+        assert plug.getStandaloneExports() == [("", "— no robot vacuum is exported yet —")]
+
+    def test_a_never_paired_vacuum_logs_its_original_code_and_opens_nothing(self, vacuum_plug):
+        client = _bridge_with(vacuum_plug)
+        vacuum_plug.runtime = _FakeRuntime([_pairing(commissioned=False, expires=None)])
+        assert vacuum_plug.menuPairMatterVacuum(self._values()) == (True, self._values())
+        client.get_standalone_pairing.assert_called_once_with(VACUUM)
+        client.open_standalone_window.assert_not_called()
+        client.get_pairing.assert_not_called()  # never the BRIDGE's code
+        logged = _logged(vacuum_plug.logger)
+        assert "1234-567-8901" in logged and "ALREADY advertising" in logged
+        assert f"?device={VACUUM}" in logged
+        assert "not part of the bridge" in logged
+
+    def test_a_paired_vacuum_gets_an_enhanced_window(self, vacuum_plug):
+        client = _bridge_with(vacuum_plug)
+        window = bridge_protocol.CommissioningWindow("9999-999-9999", "MT:NEW", "2026-11-20T12:15:00Z")
+        vacuum_plug.runtime = _FakeRuntime([
+            _pairing(commissioned=True, window_open=False, manual=None, qr=None), window])
+        assert vacuum_plug.menuPairMatterVacuum(self._values(duration="300"))[0] is True
+        client.open_standalone_window.assert_called_once_with(VACUUM, 300)
+        assert "9999-999-9999" in _logged(vacuum_plug.logger)
+
+    def test_reset_unpairs_everywhere_before_showing_new_codes(self, vacuum_plug):
+        client = _bridge_with(vacuum_plug)
+        vacuum_plug.runtime = _FakeRuntime([_pairing(commissioned=False, manual="5555-555-5555")])
+        assert vacuum_plug.menuPairMatterVacuum(self._values(vacuumReset=True))[0] is True
+        client.reset_standalone.assert_called_once_with(VACUUM)
+        client.get_standalone_pairing.assert_not_called()
+        assert "5555-555-5555" in _logged(vacuum_plug.logger)
+
+    def test_no_vacuum_chosen_is_refused_before_touching_the_node(self, vacuum_plug, plugin_mod):
+        client = _bridge_with(vacuum_plug)
+        ok, _values, errors = vacuum_plug.menuPairMatterVacuum(self._values(vacuumDevice=""))
+        assert ok is False and "vacuumDevice" in errors
+        client.get_standalone_pairing.assert_not_called()
+        client.reset_standalone.assert_not_called()
+
+    def test_a_node_failure_changes_nothing_and_says_so(self, vacuum_plug):
+        client = _bridge_with(vacuum_plug)
+        vacuum_plug.runtime = _FakeRuntime(error=bridge_protocol.BridgeProtocolError(
+            "unknown_device", "no standalone accessory for device 900021"))
+        ok, _values, errors = vacuum_plug.menuPairMatterVacuum(self._values())
+        assert ok is False and "vacuumDevice" in errors
+        client.open_standalone_window.assert_not_called()
+
+    def test_the_menu_item_is_wired(self, plugin_mod):
+        root = ET.parse(MENU_ITEMS_XML).getroot()
+        item = root.find("MenuItem[@id='pairMatterVacuum']")
+        assert item is not None
+        assert item.findtext("CallbackMethod") == "menuPairMatterVacuum"
+        assert hasattr(plugin_mod.Plugin, "menuPairMatterVacuum")
+        assert hasattr(plugin_mod.Plugin, "getStandaloneExports")
+
+
+class TestVacuumPairingPage:
+    def _action(self, query):
+        return Mock(props={"incoming_request_method": "GET", "file_path": [], "url_query_args": query})
+
+    def test_device_query_shows_the_vacuums_own_code(self, vacuum_plug):
+        client = _bridge_with(vacuum_plug)
+        vacuum_plug.runtime = _FakeRuntime([_pairing(manual="7777-777-7777")])
+        body = vacuum_plug.http_pairing(self._action({"device": str(VACUUM)}))["content"]
+        client.get_standalone_pairing.assert_called_once_with(VACUUM)
+        client.get_pairing.assert_not_called()
+        assert "7777-777-7777" in body
+
+    def test_a_non_numeric_device_is_refused_without_a_node_call(self, vacuum_plug):
+        client = _bridge_with(vacuum_plug)
+        body = vacuum_plug.http_pairing(self._action({"device": "../etc"}))["content"]
+        assert "not a device id" in body
+        client.get_standalone_pairing.assert_not_called()
+
+    def test_no_window_points_at_the_vacuum_menu(self, vacuum_plug):
+        _bridge_with(vacuum_plug)
+        vacuum_plug.runtime = _FakeRuntime([_pairing(window_open=False, manual=None, qr=None)])
+        body = vacuum_plug.http_pairing(self._action({"device": str(VACUUM)}))["content"]
+        assert "Pair Matter Vacuum" in body

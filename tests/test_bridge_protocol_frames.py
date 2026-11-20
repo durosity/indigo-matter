@@ -104,6 +104,12 @@ def _build(proto: BridgeProtocol, request: dict):
         return proto.build_factory_reset(args["preserveEndpointNumbers"], mid)
     if command == bridge_protocol.CMD_REBUILD_ENDPOINT_MAP:
         return proto.build_rebuild_endpoint_map(mid)
+    if command == bridge_protocol.CMD_GET_STANDALONE_PAIRING:
+        return proto.build_get_standalone_pairing(args["indigoDeviceId"], mid)
+    if command == bridge_protocol.CMD_OPEN_STANDALONE_WINDOW:
+        return proto.build_open_standalone_window(args["indigoDeviceId"], args["durationSeconds"], mid)
+    if command == bridge_protocol.CMD_RESET_STANDALONE:
+        return proto.build_reset_standalone(args["indigoDeviceId"], mid)
     raise AssertionError(f"no builder for command {command!r}")
 
 

@@ -285,6 +285,10 @@ class ExportDialogMixin:
         values["exportCtWarmestKShown"] = ""
         values["exportCtCoolestKShown"] = ""
         values["exportCtBoundsSource"] = ""
+        values["exportRvcStateKey"] = ""
+        values["exportRvcBatteryKey"] = ""
+        for field in ExportDialogMixin.RVC_ACTION_FIELDS:
+            values[field] = ""
         values["exportStatus"] = self._export_summary()
         return values
 
@@ -680,6 +684,86 @@ class ExportDialogMixin:
             return []
         return [(key, key) for key in export_catalog.binary_state_keys(dev)]
 
+    # ------------------------------------------------------------------
+    # Robot vacuum fields (ADR-0019)
+    # ------------------------------------------------------------------
+    #: The menu value meaning "let the handler find it" / "no action group".
+    RVC_AUTOMATIC = ""
+
+    #: Dialog field → the §4.2 command whose action group it holds.
+    RVC_ACTION_FIELDS = {
+        "exportRvcStart": "start",
+        "exportRvcStop": "stop",
+        "exportRvcPause": "pause",
+        "exportRvcResume": "resume",
+        "exportRvcGoHome": "goHome",
+    }
+
+    def _rvc_options_from_values(self, values: dict) -> dict:
+        """The vacuum options on screen, as ``options`` (only what was chosen).
+
+        Blank means "automatic" for the two state menus and "none" for the
+        action groups, and is simply left out: the handler's own fallbacks are
+        what "automatic" means, and the store refuses a 0 or an empty string.
+        """
+        options: dict = {}
+        state_key = str(values.get("exportRvcStateKey", "") or "").strip()
+        if state_key:
+            options[export_catalog.OPTION_RVC_STATE_KEY] = state_key
+        battery_key = str(values.get("exportRvcBatteryKey", "") or "").strip()
+        if battery_key:
+            options[export_catalog.OPTION_RVC_BATTERY_KEY] = battery_key
+        for field, command in self.RVC_ACTION_FIELDS.items():
+            raw = str(values.get(field, "") or "").strip()
+            if raw.isdigit() and int(raw) > 0:
+                options[export_catalog.RVC_ACTION_OPTIONS[command]] = int(raw)
+        return options
+
+    def _apply_rvc_fields(self, values: dict, options: Optional[dict]) -> None:
+        """Fill (or blank) the vacuum fields from saved ``options``."""
+        options = options or {}
+        values["exportRvcStateKey"] = str(options.get(export_catalog.OPTION_RVC_STATE_KEY, "") or "")
+        values["exportRvcBatteryKey"] = str(options.get(export_catalog.OPTION_RVC_BATTERY_KEY, "") or "")
+        for field, command in self.RVC_ACTION_FIELDS.items():
+            group = options.get(export_catalog.RVC_ACTION_OPTIONS[command])
+            values[field] = str(group) if group else self.RVC_AUTOMATIC
+
+    def _selected_device_states(self, values) -> dict:
+        kind, device_id = self._export_selection(values or {})
+        if kind != "device":
+            return {}
+        dev = self._indigo_device(device_id)
+        try:
+            return dict(getattr(dev, "states", None) or {}) if dev is not None else {}
+        except Exception:  # pylint: disable=broad-except
+            return {}
+
+    @degrades_to_list_error
+    def getExportRvcStateKeys(self, filter="", valuesDict=None, typeId="", targetId=0):
+        # pylint: disable=redefined-builtin, unused-argument
+        """The selected device's text/on-off states, for "which state is its status"."""
+        states = self._selected_device_states(valuesDict)
+        rows = [(key, f"{key} (now: {value})") for key, value in sorted(states.items())
+                if isinstance(value, (str, bool)) and "." not in key]
+        return [(self.RVC_AUTOMATIC, "Automatic (find a status state)")] + rows
+
+    @degrades_to_list_error
+    def getExportRvcBatteryKeys(self, filter="", valuesDict=None, typeId="", targetId=0):
+        # pylint: disable=redefined-builtin, unused-argument
+        """The selected device's numeric states, for "which state is its battery"."""
+        states = self._selected_device_states(valuesDict)
+        rows = [(key, f"{key} (now: {value})") for key, value in sorted(states.items())
+                if isinstance(value, (int, float)) and not isinstance(value, bool)]
+        return [(self.RVC_AUTOMATIC, "Automatic (Indigo battery level, or find one)")] + rows
+
+    @degrades_to_list_error
+    def getExportActionGroups(self, filter="", valuesDict=None, typeId="", targetId=0):
+        # pylint: disable=redefined-builtin, unused-argument
+        """Every Indigo action group, for the five vacuum command menus."""
+        groups = sorted(((str(group.id), str(group.name)) for group in indigo.actionGroups),
+                        key=lambda row: row[1].lower())
+        return [(self.RVC_AUTOMATIC, "— none —")] + groups
+
     def exportRoleChanged(self, valuesDict, typeId="", devId=0):
         # pylint: disable=unused-argument
         """Role selection changed: re-derive the polarity default.
@@ -837,6 +921,7 @@ class ExportDialogMixin:
             values["exportName"] = entry.name_override or ""
             values["exportInvert"] = bool(entry.options.get(OPTION_INVERT, False))
             self._apply_ct_bounds_fields(values, entry.options)
+            self._apply_rvc_fields(values, entry.options)
             values["exportStatus"] = f"{dev.name} is exported as {export_catalog.role_label(entry.role)}."
         else:
             values["exportRole"] = verdict.default_role
@@ -844,6 +929,7 @@ class ExportDialogMixin:
             values["exportName"] = ""
             values["exportInvert"] = False
             self._apply_ct_bounds_fields(values, None)
+            self._apply_rvc_fields(values, None)
             values["exportStatus"] = f"{dev.name} is not exported yet."
         return values
 
@@ -1103,7 +1189,8 @@ class ExportDialogMixin:
         # composed BEFORE classifying: a custom device is eligible precisely
         # because the user has now answered which state is its reading.
         mapping = self._mapping_from_values(values)
-        verdict = export_catalog.classify(dev, self._export_plugin_id(), mapping)
+        rvc_options = self._rvc_options_from_values(values)
+        verdict = export_catalog.classify(dev, self._export_plugin_id(), {**mapping, **rvc_options})
         if kind == "excluded" or isinstance(verdict, export_catalog.Excluded):
             reason = verdict.reason if isinstance(verdict, export_catalog.Excluded) \
                 else "not exportable"
@@ -1135,6 +1222,8 @@ class ExportDialogMixin:
         options = dict(mapping) if role in MAPPABLE_ROLES else {}
         if role == export_catalog.ROLE_WINDOW_COVERING and self._truthy(values.get("exportInvert")):
             options[OPTION_INVERT] = True
+        if role == export_catalog.ROLE_ROBOTIC_VACUUM:
+            options.update(rvc_options)
         previous = self.exports.get(device_id)
         if role in CT_BOUNDS_ROLES:
             ct_seed, ct_error = self._ct_seed_from_values(
@@ -1172,8 +1261,21 @@ class ExportDialogMixin:
         self._nudge_export(device_id, role_changed=role_changed)
         values["exportStatus"] = f"{verb} {dev.name} as {export_catalog.role_label(role)}. " \
                                  f"{self._role_change_warning(role_changed)}{ct_coherence_note}" \
+                                 f"{self._vacuum_note(role, options)}" \
                                  f"{self._export_summary()}"
         return values
+
+    @staticmethod
+    def _vacuum_note(role: str, options: dict) -> str:
+        """What the user must do next for a vacuum, which pairing the bridge does not cover."""
+        if role != export_catalog.ROLE_ROBOTIC_VACUUM:
+            return ""
+        missing = [command for command, key in export_catalog.RVC_ACTION_OPTIONS.items()
+                   if key not in options and command != "resume"]
+        gap = (f" No action group is chosen for {', '.join(missing)} — those buttons will do "
+               "nothing in Apple Home until you choose one." if missing else "")
+        return ("It is its own Matter accessory: add it with Plugins ▸ Matter ▸ Pair Matter "
+                f"Vacuum…, not by pairing the bridge.{gap} ")
 
     @staticmethod
     def _role_change_warning(role_changed: bool) -> str:

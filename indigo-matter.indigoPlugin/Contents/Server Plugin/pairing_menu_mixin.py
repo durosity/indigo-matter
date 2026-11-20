@@ -135,6 +135,107 @@ class PairingMenuMixin:
                                 window.window_expires_at, already_open=False)
         return (True, valuesDict)
 
+    # ------------------------------------------------------------------
+    # Standalone accessories — the robot vacuum (ADR-0019, §3.12)
+    # ------------------------------------------------------------------
+    @degrades_to_list_error
+    def getStandaloneExports(self, filter="", valuesDict=None, typeId="", targetId=0):  # noqa: N802, A002
+        """The exports that pair on their own (today: robot vacuums), for the menu."""
+        # pylint: disable=unused-argument,redefined-builtin
+        entries = [entry for entry in (self.exports.all() if self.exports is not None else [])
+                   if bridge_protocol.is_standalone_role(entry.role)]
+        rows = []
+        for entry in entries:
+            try:
+                name = indigo.devices[entry.indigo_device_id].name
+            except Exception:  # pylint: disable=broad-except
+                name = f"device {entry.indigo_device_id}"
+            rows.append((str(entry.indigo_device_id), entry.label_for(name)))
+        if not rows:
+            return [("", "— no robot vacuum is exported yet —")]
+        return sorted(rows, key=lambda row: row[1].lower())
+
+    def menuPairMatterVacuum(self, valuesDict, menuId=""):  # noqa: N802, ARG002
+        # pylint: disable=too-many-return-statements,unused-argument
+        """Put a robot vacuum's OWN pairing code in the event log (ADR-0019).
+
+        A vacuum is not a bridged accessory: Apple Home and Alexa cannot drive
+        one behind a bridge, so it is published as a Matter device of its own,
+        and pairing the bridge does not add it. This is that device's version
+        of "Pair Matter Bridge…" — same three cases (never paired: its code is
+        already open; paired: open a window for another ecosystem; reset: unpair
+        everywhere and advertise under new codes), same event-log channel.
+        """
+        errors = indigo.Dict()
+        raw = str((valuesDict or {}).get("vacuumDevice", "") or "").strip()
+        if not raw.isdigit():
+            errors["vacuumDevice"] = "Choose the vacuum to pair."
+            return (False, valuesDict, errors)
+        device_id = int(raw)
+        duration = self._window_duration(valuesDict, errors)
+        if duration is None:
+            return (False, valuesDict, errors)
+        client = self._pairing_client(errors, "vacuumDevice")
+        if client is None:
+            return (False, valuesDict, errors)
+        reset = str((valuesDict or {}).get("vacuumReset", "")).lower() in ("true", "1", "yes")
+        try:
+            if reset:
+                pairing = self.runtime.submit(client.reset_standalone(device_id)).result(
+                    timeout=WINDOW_OPEN_TIMEOUT)
+                self.logger.warning(
+                    "Matter export — robot vacuum (device %s) RESET: it has been removed from every "
+                    "ecosystem it was paired with, and now advertises under new codes.", device_id)
+            else:
+                pairing = self.runtime.submit(client.get_standalone_pairing(device_id)).result(
+                    timeout=PAIRING_READ_TIMEOUT)
+        except Exception as exc:  # pylint: disable=broad-except
+            # Absorbing, like menuPairMatterBridge: the refusal is explicit and
+            # nothing was changed (an unknown_device here means the node has not
+            # published this vacuum — usually a bridge node older than 0.18.0).
+            self.logger.error("Matter export: could not read the robot vacuum's pairing state — %s. "
+                              "Nothing was changed.", exc)
+            self.logger.exception(exc)
+            errors["vacuumDevice"] = "Could not reach the vacuum's Matter node — see the log."
+            return (False, valuesDict, errors)
+        if pairing.window_open and pairing.manual_pairing_code:
+            self._log_vacuum_codes(device_id, pairing.manual_pairing_code, pairing.qr_pairing_code,
+                                   pairing.window_expires_at, already_open=not pairing.commissioned)
+            return (True, valuesDict)
+        try:
+            window = self.runtime.submit(
+                client.open_standalone_window(device_id, duration)).result(timeout=WINDOW_OPEN_TIMEOUT)
+        except Exception as exc:  # pylint: disable=broad-except
+            self.logger.error(
+                "Matter export: opening a pairing window on the robot vacuum FAILED — %s. Nothing was "
+                "changed and existing pairings are untouched.", exc)
+            self.logger.exception(exc)
+            errors["vacuumDevice"] = "Could not open a pairing window — see the log."
+            return (False, valuesDict, errors)
+        self._log_vacuum_codes(device_id, window.manual_pairing_code, window.qr_pairing_code,
+                               window.window_expires_at, already_open=False)
+        return (True, valuesDict)
+
+    def _log_vacuum_codes(self, device_id: int, manual: Optional[str], qr: Optional[str],
+                          expires_at: Optional[str], *, already_open: bool) -> None:
+        """The vacuum's version of :meth:`_log_pairing_codes` — the same security note."""
+        when = f" It expires at {expires_at}." if expires_at else ""
+        opening = ("This vacuum has never been paired, so it is ALREADY advertising with its "
+                   "original code — no new window was opened." if already_open else
+                   "A pairing window is now open on the vacuum.")
+        self.logger.info(
+            "Matter export — robot vacuum (device %s): %s%s\n"
+            "    Manual pairing code: %s\n"
+            "    QR payload: %s\n"
+            "    QR code page: %s?device=%s\n"
+            "The vacuum is its OWN Matter accessory, not part of the bridge: add it in your "
+            "ecosystem's app as a separate accessory with THIS code (pairing the bridge does not "
+            "add it). Expect an 'uncertified accessory' warning; choose Add Anyway.\n"
+            "SECURITY: while this window is open, anyone who can read this code can add the vacuum "
+            "to THEIR Apple Home, Alexa or Google account. Do not share it.",
+            device_id, opening, when, manual or "(none)", qr or "(none)",
+            self._pairing_page_url(), device_id)
+
     @staticmethod
     def _window_duration(values_dict, errors) -> Optional[int]:
         """Validate the duration field against §3.8's 180-900s band.

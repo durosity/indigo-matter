@@ -289,6 +289,11 @@ class ExportDialogMixin:
         values["exportRvcBatteryKey"] = ExportDialogMixin.RVC_AUTOMATIC
         for field in ExportDialogMixin.RVC_ACTION_FIELDS:
             values[field] = ExportDialogMixin.RVC_AUTOMATIC
+        values["exportRvcRooms"] = ""
+        values["exportRvcRoomsVariable"] = ExportDialogMixin.RVC_AUTOMATIC
+        values["exportRvcModeVariable"] = ExportDialogMixin.RVC_AUTOMATIC
+        for field in ExportDialogMixin.RVC_MODE_FIELDS:
+            values[field] = False
         values["exportStatus"] = self._export_summary()
         return values
 
@@ -705,6 +710,34 @@ class ExportDialogMixin:
         "exportRvcLocate": "locate",
     }
 
+    #: Dialog tick-box → §4.1 cleaning mode, in the node's own order.
+    RVC_MODE_FIELDS = {
+        "exportRvcModeVacuum": "vacuum",
+        "exportRvcModeMop": "mop",
+        "exportRvcModeVacuumThenMop": "vacuumThenMop",
+    }
+
+    def _rvc_rooms_error(self, values: dict) -> str:
+        """Why the rooms/modes on screen cannot be saved, or ``""``.
+
+        Refused while the dialog is open rather than saved and quietly ignored:
+        a typo in a room list is a room that never appears in Apple Home, and
+        the user would have no way to connect the two.
+        """
+        text = str(values.get("exportRvcRooms", "") or "").strip()
+        if text:
+            try:
+                export_handlers.parse_rooms(text)
+            except ValueError as exc:
+                return f"Rooms: {exc}. Write them as id=name, e.g. 1=Kitchen, 7=Hallway."
+        modes = [mode for field, mode in self.RVC_MODE_FIELDS.items() if self._truthy(values.get(field))]
+        if len(modes) == 1:
+            return ("Cleaning modes: tick at least two (a single mode is nothing to choose between), "
+                    "or none.")
+        if modes and "vacuum" not in modes and "mop" not in modes:
+            return "Cleaning modes: Vacuum then mop needs Vacuum or Mop ticked as well."
+        return ""
+
     def _rvc_options_from_values(self, values: dict) -> dict:
         """The vacuum options on screen, as ``options`` (only what was chosen).
 
@@ -723,6 +756,17 @@ class ExportDialogMixin:
             raw = str(values.get(field, "") or "").strip()
             if raw.isdigit() and int(raw) > 0:
                 options[export_catalog.RVC_ACTION_OPTIONS[command]] = int(raw)
+        rooms = str(values.get("exportRvcRooms", "") or "").strip()
+        if rooms:
+            options[export_catalog.OPTION_RVC_ROOMS] = rooms
+        modes = [mode for field, mode in self.RVC_MODE_FIELDS.items() if self._truthy(values.get(field))]
+        if modes:
+            options[export_catalog.OPTION_RVC_CLEAN_MODES] = modes
+        for field, key in (("exportRvcRoomsVariable", export_catalog.OPTION_RVC_ROOMS_VARIABLE),
+                           ("exportRvcModeVariable", export_catalog.OPTION_RVC_MODE_VARIABLE)):
+            raw = str(values.get(field, "") or "").strip()
+            if raw.isdigit() and int(raw) > 0:
+                options[key] = int(raw)
         return options
 
     def _apply_rvc_fields(self, values: dict, options: Optional[dict]) -> None:
@@ -735,6 +779,14 @@ class ExportDialogMixin:
         for field, command in self.RVC_ACTION_FIELDS.items():
             group = options.get(export_catalog.RVC_ACTION_OPTIONS[command])
             values[field] = str(group) if group else self.RVC_AUTOMATIC
+        values["exportRvcRooms"] = str(options.get(export_catalog.OPTION_RVC_ROOMS, "") or "")
+        modes = options.get(export_catalog.OPTION_RVC_CLEAN_MODES) or []
+        for field, mode in self.RVC_MODE_FIELDS.items():
+            values[field] = mode in modes
+        for field, key in (("exportRvcRoomsVariable", export_catalog.OPTION_RVC_ROOMS_VARIABLE),
+                           ("exportRvcModeVariable", export_catalog.OPTION_RVC_MODE_VARIABLE)):
+            variable = options.get(key)
+            values[field] = str(variable) if variable else self.RVC_AUTOMATIC
 
     def _selected_device_states(self, values) -> dict:
         kind, device_id = self._export_selection(values or {})
@@ -763,6 +815,14 @@ class ExportDialogMixin:
         rows = [(key, f"{key} (now: {value})") for key, value in sorted(states.items())
                 if isinstance(value, (int, float)) and not isinstance(value, bool)]
         return [(self.RVC_AUTOMATIC, "Automatic (Indigo battery level, or find one)")] + rows
+
+    @degrades_to_list_error
+    def getExportVariables(self, filter="", valuesDict=None, typeId="", targetId=0):
+        # pylint: disable=redefined-builtin, unused-argument
+        """Every Indigo variable, for the room-selection and cleaning-mode menus."""
+        variables = sorted(((str(variable.id), str(variable.name)) for variable in indigo.variables),
+                           key=lambda row: row[1].lower())
+        return [(self.RVC_AUTOMATIC, "— none —")] + variables
 
     @degrades_to_list_error
     def getExportActionGroups(self, filter="", valuesDict=None, typeId="", targetId=0):
@@ -1231,6 +1291,10 @@ class ExportDialogMixin:
         if role == export_catalog.ROLE_WINDOW_COVERING and self._truthy(values.get("exportInvert")):
             options[OPTION_INVERT] = True
         if role == export_catalog.ROLE_ROBOTIC_VACUUM:
+            rooms_error = self._rvc_rooms_error(values)
+            if rooms_error:
+                values["exportStatus"] = rooms_error
+                return values
             options.update(rvc_options)
         previous = self.exports.get(device_id)
         if role in CT_BOUNDS_ROLES:

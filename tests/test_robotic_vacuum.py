@@ -338,3 +338,93 @@ class TestAttachReport:
             {k: v for k, v in FRAMES["get_status"]["response"]["result"].items() if k != "standalone"})
         self._bridge(bridge_mod, mock_logger)._report_standalone(status)
         assert self._logged(mock_logger) == ""
+
+
+# ---------------------------------------------------------------------------
+# Rooms (Service Area) and cleaning modes (RVC Clean Mode)
+# ---------------------------------------------------------------------------
+ROOMS_TEXT = "1=Kitchen, 7=Hallway"
+ROOMS_OPTIONS = {"rvcRooms": ROOMS_TEXT, "rvcRoomsVariable": 501,
+                 "rvcCleanModes": ["vacuum", "mop"], "rvcModeVariable": 502}
+
+
+class TestRoomsAndModes:
+    @pytest.mark.parametrize("text, rooms", [
+        ("1=Kitchen, 7=Hallway", [(1, "Kitchen"), (7, "Hallway")]),
+        ("1:Kitchen; 7 : Hallway\n12=Lounge", [(1, "Kitchen"), (7, "Hallway"), (12, "Lounge")]),
+        ("", []), ("  ,  ", []),
+    ])
+    def test_parse_rooms(self, handlers, text, rooms):
+        assert handlers.parse_rooms(text) == rooms
+
+    @pytest.mark.parametrize("text", ["Kitchen", "x=Kitchen", "1=", "1=A, 1=B", "1=Kitchen, 2=kitchen",
+                                      "-1=Kitchen", 7])
+    def test_parse_rooms_refuses_with_a_reason(self, handlers, text):
+        with pytest.raises(ValueError):
+            handlers.parse_rooms(text)
+
+    def test_the_wire_carries_rooms_and_modes_in_the_nodes_shape(self, handlers):
+        assert handlers.handler_for(ROLE).wire_options(ROOMS_OPTIONS) == {
+            "areas": [{"areaId": 1, "name": "Kitchen"}, {"areaId": 7, "name": "Hallway"}],
+            "cleanModes": ["vacuum", "mop"],
+        }
+
+    def test_nothing_declared_sends_nothing(self, handlers):
+        assert handlers.handler_for(ROLE).wire_options({}) == {}
+        assert handlers.handler_for(ROLE).wire_options({"rvcCleanModes": ["vacuum"]}) == {}, \
+            "one mode is nothing to choose between"
+
+    def test_no_other_role_sends_wire_options(self, handlers):
+        for role, handler in handlers.HANDLERS.items():
+            if role != ROLE:
+                assert handler.wire_options(ROOMS_OPTIONS) == {}, role
+
+    def test_a_room_selection_is_written_to_the_variable(self, handlers, mock_indigo_base):
+        handler = handlers.handler_for(ROLE)
+        assert handler.dispatch("selectAreas", {"areaIds": [7, 1, 99]}, tuya_vacuum(), ROOMS_OPTIONS) is True
+        mock_indigo_base.variable.updateValue.assert_called_once_with(501, value="7,1")
+        mock_indigo_base.actionGroup.execute.assert_not_called()  # start does that
+
+    def test_everywhere_is_an_empty_value(self, handlers, mock_indigo_base):
+        handlers.handler_for(ROLE).dispatch("selectAreas", {"areaIds": []}, tuya_vacuum(), ROOMS_OPTIONS)
+        mock_indigo_base.variable.updateValue.assert_called_once_with(501, value="")
+
+    def test_a_mode_is_written_to_the_variable(self, handlers, mock_indigo_base):
+        assert handlers.handler_for(ROLE).dispatch("setCleanMode", {"mode": "mop"}, tuya_vacuum(),
+                                                   ROOMS_OPTIONS) is True
+        mock_indigo_base.variable.updateValue.assert_called_once_with(502, value="mop")
+
+    def test_an_undeclared_mode_writes_nothing(self, handlers, mock_indigo_base):
+        outcome = handlers.handler_for(ROLE).dispatch("setCleanMode", {"mode": "vacuumThenMop"},
+                                                      tuya_vacuum(), ROOMS_OPTIONS)
+        assert isinstance(outcome, str)
+        mock_indigo_base.variable.updateValue.assert_not_called()
+
+    def test_no_variable_chosen_is_a_reasoned_no_op(self, handlers, mock_indigo_base):
+        options = {"rvcRooms": ROOMS_TEXT}
+        outcome = handlers.handler_for(ROLE).dispatch("selectAreas", {"areaIds": [1]}, tuya_vacuum(), options)
+        assert isinstance(outcome, str) and "variable" in outcome
+        mock_indigo_base.variable.updateValue.assert_not_called()
+
+    def test_the_store_accepts_the_declaration(self):
+        entry = ExportEntry.from_dict({"indigoDeviceId": VACUUM, "role": ROLE, "options": dict(ROOMS_OPTIONS)})
+        assert entry.options["rvcRooms"] == ROOMS_TEXT
+
+    @pytest.mark.parametrize("options", [
+        {"rvcRooms": "Kitchen"}, {"rvcRooms": 7}, {"rvcCleanModes": ["steam"]},
+        {"rvcCleanModes": "vacuum"}, {"rvcCleanModes": ["mop", "mop"]}, {"rvcRoomsVariable": "501"},
+        {"rvcModeVariable": 0},
+    ])
+    def test_the_store_refuses_a_malformed_declaration(self, options):
+        with pytest.raises(ValueError):
+            ExportEntry.from_dict({"indigoDeviceId": VACUUM, "role": ROLE, "options": options})
+
+    def test_the_spec_carries_rooms_on_the_wire(self, bridge_mod, mock_logger):
+        entry = ExportEntry(VACUUM, ROLE, options=dict(ROOMS_OPTIONS))
+        bridge = _bridge(bridge_mod, mock_logger, FakeIndigoDevices([tuya_vacuum()]), [entry], "0.18.0")
+        (spec,) = bridge.endpoint_specs()
+        assert spec.options == {
+            "areas": [{"areaId": 1, "name": "Kitchen"}, {"areaId": 7, "name": "Hallway"}],
+            "cleanModes": ["vacuum", "mop"],
+        }
+        assert "rvcRooms" not in spec.options, "the stored text never leaves the plugin"

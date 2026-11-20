@@ -113,6 +113,8 @@ OPTION_RVC_STATE_KEY = export_catalog.OPTION_RVC_STATE_KEY
 OPTION_RVC_BATTERY_KEY = export_catalog.OPTION_RVC_BATTERY_KEY
 RVC_ACTION_OPTION_KEYS = tuple(export_catalog.RVC_ACTION_OPTIONS.values())
 RVC_ROLES = (export_catalog.ROLE_ROBOTIC_VACUUM,)
+#: Positive int ids of Indigo VARIABLES (not action groups — same shape).
+RVC_VARIABLE_OPTION_KEYS = (export_catalog.OPTION_RVC_ROOMS_VARIABLE, export_catalog.OPTION_RVC_MODE_VARIABLE)
 
 #: The message the dialog shows when the whole blob was unreadable (S3). The
 #: store must never let the UI say "nothing is exported yet" after this.
@@ -173,7 +175,7 @@ def _validate_rvc(options: dict, role: str, device_id: int) -> None:
     "turn on" ran somebody's action group — exactly the silent cross-wiring
     the per-role rule exists to stop.
     """
-    for key in (OPTION_RVC_STATE_KEY, OPTION_RVC_BATTERY_KEY, *RVC_ACTION_OPTION_KEYS):
+    for key in export_catalog.RVC_OPTION_KEYS:
         if key not in options:
             continue
         if role not in RVC_ROLES:
@@ -181,13 +183,33 @@ def _validate_rvc(options: dict, role: str, device_id: int) -> None:
                 f"export entry has the {key!r} option on role {role!r}, which is not a robot "
                 f"vacuum (device {device_id})")
         value = options[key]
-        if key in RVC_ACTION_OPTION_KEYS:
+        if key == export_catalog.OPTION_RVC_ROOMS:
+            # Imported here, not at module level: export_handlers imports
+            # `indigo`, which this module must not need just to load prefs.
+            from export_handlers import parse_rooms  # pylint: disable=import-outside-toplevel
+            try:
+                parse_rooms(value)
+            except ValueError as exc:
+                raise ValueError(f"export entry {key!r} option is unusable: {exc} (device {device_id})") from exc
+            continue
+        if key == export_catalog.OPTION_RVC_CLEAN_MODES:
+            if (not isinstance(value, list) or len(set(value)) != len(value)
+                    or not all(mode in bridge_protocol_clean_modes() for mode in value)):
+                raise ValueError(f"export entry {key!r} option is not a list of cleaning modes (device {device_id})")
+            continue
+        if key in RVC_ACTION_OPTION_KEYS or key in RVC_VARIABLE_OPTION_KEYS:
             if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
                 raise ValueError(
-                    f"export entry {key!r} option is not an action group id (device {device_id})")
+                    f"export entry {key!r} option is not an Indigo action group or variable id (device {device_id})")
         elif not isinstance(value, str) or not value:
             raise ValueError(
                 f"export entry {key!r} option is not a non-empty string (device {device_id})")
+
+
+def bridge_protocol_clean_modes() -> tuple:
+    """§4.1 ``cleanModes`` domain (kept import-light for the same reason as above)."""
+    import bridge_protocol  # pylint: disable=import-outside-toplevel
+    return bridge_protocol.RVC_CLEAN_MODES
 
 
 def _validate_ct_bounds(options: dict, role: str, device_id: int) -> None:

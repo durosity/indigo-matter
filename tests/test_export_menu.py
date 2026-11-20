@@ -2827,3 +2827,48 @@ def test_vacuum_options_never_ride_along_on_another_role(plug, vacuum):  # noqa:
     """A stale action group on screen must not be saved onto, say, a plug."""
     plug.exportAddOrUpdate(_rvc_values(device=101, exportRole="onOffPlugInUnit", exportRvcStart="11"))
     assert plug.exports.get(101).options == {}
+
+
+ROOM_FIELDS = ("exportRvcRoomsHelp", "exportRvcRooms", "exportRvcRoomsVariable", "exportRvcModeVacuum",
+               "exportRvcModeMop", "exportRvcModeVacuumThenMop", "exportRvcModeVariable")
+
+
+@pytest.mark.parametrize("field_id", ROOM_FIELDS)
+def test_room_fields_are_visible_only_for_the_vacuum_role(field_id):
+    field = _menu_item().find(f".//Field[@id='{field_id}']")
+    assert field is not None
+    assert field.get("visibleBindingValue") == "roboticVacuumCleaner"
+
+
+def test_the_variable_menus_offer_none_first_and_no_empty_value(plug, mock_indigo_base):
+    variable = Mock(id=501)
+    variable.name = "vacuum_rooms"
+    mock_indigo_base.variables = [variable]
+    rows = plug.getExportVariables()
+    assert rows == [("0", "— none —"), ("501", "vacuum_rooms")]
+
+
+def test_saving_rooms_and_modes(plug, vacuum):  # noqa: ARG001
+    values = plug.exportAddOrUpdate(_rvc_values(
+        exportRole="roboticVacuumCleaner", exportRvcRooms="1=Kitchen, 7=Hallway",
+        exportRvcRoomsVariable="501", exportRvcModeVacuum=True, exportRvcModeMop=True,
+        exportRvcModeVariable="502"))
+    options = plug.exports.get(VACUUM).options
+    assert options["rvcRooms"] == "1=Kitchen, 7=Hallway"
+    assert options["rvcCleanModes"] == ["vacuum", "mop"]
+    assert (options["rvcRoomsVariable"], options["rvcModeVariable"]) == (501, 502)
+    reopened = plug.exportDeviceChanged(_rvc_values())
+    assert reopened["exportRvcRooms"] == "1=Kitchen, 7=Hallway"
+    assert reopened["exportRvcModeMop"] is True and reopened["exportRvcModeVacuumThenMop"] is False
+    assert reopened["exportRvcRoomsVariable"] == "501"
+    assert "Added" in values["exportStatus"]
+
+
+@pytest.mark.parametrize("extra, message", [
+    ({"exportRvcRooms": "Kitchen"}, "Rooms:"),
+    ({"exportRvcModeMop": True}, "at least two"),
+])
+def test_a_bad_room_list_or_mode_set_is_refused_while_the_dialog_is_open(plug, vacuum, extra, message):  # noqa: ARG001
+    values = plug.exportAddOrUpdate(_rvc_values(exportRole="roboticVacuumCleaner", **extra))
+    assert message in values["exportStatus"]
+    assert plug.exports.get(VACUUM) is None, "nothing was saved"

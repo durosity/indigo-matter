@@ -46,7 +46,9 @@ import { OccupancySensingServer } from "@matter/main/behaviors/occupancy-sensing
 import { OnOffServer } from "@matter/main/behaviors/on-off";
 import { PowerSourceServer } from "@matter/main/behaviors/power-source";
 import { RvcOperationalStateServer } from "@matter/main/behaviors/rvc-operational-state";
+import { RvcCleanModeServer } from "@matter/main/behaviors/rvc-clean-mode";
 import { RvcRunModeServer } from "@matter/main/behaviors/rvc-run-mode";
+import { ServiceAreaServer } from "@matter/main/behaviors/service-area";
 import { SmokeCoAlarmServer } from "@matter/main/behaviors/smoke-co-alarm";
 import { ThermostatServer } from "@matter/main/behaviors/thermostat";
 import { MovementDirection, MovementType, WindowCoveringServer } from "@matter/main/behaviors/window-covering";
@@ -56,7 +58,9 @@ import { Identify } from "@matter/main/clusters/identify";
 import { LevelControl } from "@matter/main/clusters/level-control";
 import { ModeBase } from "@matter/main/clusters/mode-base";
 import { RvcOperationalState } from "@matter/main/clusters/rvc-operational-state";
+import { RvcCleanMode } from "@matter/main/clusters/rvc-clean-mode";
 import { RvcRunMode } from "@matter/main/clusters/rvc-run-mode";
+import { ServiceArea } from "@matter/main/clusters/service-area";
 import { SmokeCoAlarm } from "@matter/main/clusters/smoke-co-alarm";
 import { Thermostat } from "@matter/main/clusters/thermostat";
 import { ColorTemperatureLightDevice } from "@matter/main/devices/color-temperature-light";
@@ -1518,6 +1522,220 @@ class IndigoIdentifyServer extends IdentifyServer {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Vacuum rooms (Service Area) and cleaning modes (RVC Clean Mode)
+// ---------------------------------------------------------------------------
+
+/** §4.1 `options.areas` — one room the vacuum's own map knows, by the vacuum's id. */
+export interface RvcArea {
+    areaId: number;
+    name: string;
+}
+
+/** §4.1 `options.cleanModes` — the domain, in the order the node numbers them. */
+export const RVC_CLEAN_MODES = ["vacuum", "mop", "vacuumThenMop"] as const;
+export type RvcCleanModeValue = (typeof RVC_CLEAN_MODES)[number];
+
+const RVC_CLEAN_MODE_DEFINITIONS: Record<RvcCleanModeValue, { label: string; tag: RvcCleanMode.ModeTag }> = {
+    vacuum: { label: "Vacuum", tag: RvcCleanMode.ModeTag.Vacuum },
+    mop: { label: "Mop", tag: RvcCleanMode.ModeTag.Mop },
+    vacuumThenMop: { label: "Vacuum then mop", tag: RvcCleanMode.ModeTag.VacuumThenMop },
+};
+
+/** Caps that keep a hand-edited options blob from building something absurd. */
+export const RVC_AREAS_MAX = 64;
+export const RVC_AREA_NAME_MAX = 128;
+const UINT32_MAX = 0xffff_ffff;
+
+/**
+ * `options.areas`, validated, or `undefined` (= publish no Service Area).
+ *
+ * Same contract as {@link extractCtBounds}: anything unusable is treated as
+ * ABSENT with one warning, never a refusal — a refused attach takes every
+ * export offline over one malformed room list. Usable means a non-empty array
+ * of at most {@link RVC_AREAS_MAX} `{areaId: uint32, name: non-empty string}`
+ * with unique ids and unique names (matter.js validates both and would throw
+ * mid-construction).
+ */
+export function extractRvcAreas(options: Record<string, unknown>, indigoDeviceId: number): RvcArea[] | undefined {
+    const raw = options.areas;
+    if (raw === undefined) {
+        return undefined;
+    }
+    const reject = (why: string): undefined => {
+        logger.warn(`Ignoring options.areas for device ${indigoDeviceId}: ${why}`);
+        return undefined;
+    };
+    if (!Array.isArray(raw) || raw.length === 0 || raw.length > RVC_AREAS_MAX) {
+        return reject(`expected 1-${RVC_AREAS_MAX} rooms`);
+    }
+    const ids = new Set<number>();
+    const names = new Set<string>();
+    const areas: RvcArea[] = [];
+    for (const entry of raw) {
+        const { areaId, name } = (entry ?? {}) as { areaId?: unknown; name?: unknown };
+        if (typeof areaId !== "number" || !Number.isInteger(areaId) || areaId < 0 || areaId > UINT32_MAX) {
+            return reject(`room id ${String(areaId)} is not a whole number 0-${UINT32_MAX}`);
+        }
+        if (typeof name !== "string" || name.trim() === "" || name.length > RVC_AREA_NAME_MAX) {
+            return reject(`room ${areaId} has no usable name`);
+        }
+        const trimmed = name.trim();
+        if (ids.has(areaId) || names.has(trimmed.toLowerCase())) {
+            return reject(`room ${areaId} (${trimmed}) repeats an id or a name`);
+        }
+        ids.add(areaId);
+        names.add(trimmed.toLowerCase());
+        areas.push({ areaId, name: trimmed });
+    }
+    return areas;
+}
+
+/**
+ * `options.cleanModes`, validated, or `undefined` (= publish no Clean Mode).
+ *
+ * Usable means at least TWO distinct modes from {@link RVC_CLEAN_MODES}, one
+ * of them plain `vacuum` or `mop` (matter.js's own rule). One mode would be a
+ * menu with nothing to choose, so it is treated as absent rather than shown.
+ */
+export function extractRvcCleanModes(
+    options: Record<string, unknown>,
+    indigoDeviceId: number,
+): RvcCleanModeValue[] | undefined {
+    const raw = options.cleanModes;
+    if (raw === undefined) {
+        return undefined;
+    }
+    const reject = (why: string): undefined => {
+        logger.warn(`Ignoring options.cleanModes for device ${indigoDeviceId}: ${why}`);
+        return undefined;
+    };
+    if (!Array.isArray(raw)) {
+        return reject("not a list");
+    }
+    const modes = [...new Set(raw)];
+    if (modes.length !== raw.length || !modes.every(mode => (RVC_CLEAN_MODES as readonly unknown[]).includes(mode))) {
+        return reject(`expected distinct modes from ${RVC_CLEAN_MODES.join(", ")}`);
+    }
+    if (modes.length < 2) {
+        return reject("fewer than two modes is nothing to choose between");
+    }
+    if (!modes.includes("vacuum") && !modes.includes("mop")) {
+        return reject("needs vacuum or mop as well");
+    }
+    // The node's own order, not the plugin's: a mode NUMBER is what an
+    // ecosystem caches, so it must not move because a list was reordered.
+    return RVC_CLEAN_MODES.filter(mode => modes.includes(mode));
+}
+
+/** Matter mode number for a clean mode: its index in {@link RVC_CLEAN_MODES}. Stable by construction. */
+function cleanModeNumber(mode: RvcCleanModeValue): number {
+    return RVC_CLEAN_MODES.indexOf(mode);
+}
+
+/**
+ * Service Area, reporting a room selection to the plugin.
+ *
+ * **The one place a vacuum attribute is written by the node, on purpose.**
+ * `selectedAreas` is not a claim about the machine — it is the ORDER, the
+ * rooms the next clean should cover, which Apple Home sends just before
+ * `start`. Stock validation runs first (`super`), and only a selection
+ * matter.js accepted is reported, as §4.2 `selectAreas {"areaIds": [...]}`
+ * (empty = "everywhere"). `operationalState` still moves only when Indigo
+ * says the vacuum did.
+ *
+ * **`.with(Maps)` is a matter.js 0.17.8 workaround, not a feature choice.**
+ * The base server's `initialize` reads `supportedMaps.length` unconditionally
+ * (`ServiceAreaServer.js` `#assertSupportedMaps`), and without the Maps
+ * feature that attribute does not exist — every construction failed with
+ * "Cannot read properties of undefined (reading 'length')". With Maps and an
+ * EMPTY `supportedMaps`, the specification's single-map case, every area's
+ * `mapId` is null, which is exactly what a one-floor room list is.
+ */
+class IndigoServiceAreaServer extends ServiceAreaServer.with(ServiceArea.Feature.Maps) {
+    override selectAreas(request: ServiceArea.SelectAreasRequest): MaybePromise<ServiceArea.SelectAreasResponse> {
+        const result = super.selectAreas(request) as ServiceArea.SelectAreasResponse;
+        if (result.status === ServiceArea.SelectAreasStatus.Success) {
+            emitCommand(this.endpoint.id, "selectAreas", { areaIds: [...this.state.selectedAreas] }, true);
+        }
+        return result;
+    }
+}
+
+/**
+ * RVC Clean Mode, reporting a mode choice to the plugin.
+ *
+ * Like the room selection, a cleaning mode is a setting for the NEXT run, not
+ * a statement about what the vacuum is doing — and most vacuum plugins have no
+ * state to confirm it from, so a never-confirmed mode would snap back in Home
+ * every time it was chosen. So the node keeps the choice (`currentMode`) and
+ * reports it as §4.2 `setCleanMode {"mode": "mop"}`.
+ */
+class IndigoRvcCleanModeServer extends RvcCleanModeServer {
+    override changeToMode({ newMode }: ModeBase.ChangeToModeRequest): MaybePromise<ModeBase.ChangeToModeResponse> {
+        const mode = RVC_CLEAN_MODES[newMode];
+        if (mode === undefined || !this.state.supportedModes.some(option => option.mode === newMode)) {
+            return { status: ModeBase.ModeChangeStatus.UnsupportedMode, statusText: `Unsupported mode ${newMode}` };
+        }
+        emitCommand(this.endpoint.id, "setCleanMode", { mode }, true);
+        this.state.currentMode = newMode;
+        return { status: ModeBase.ModeChangeStatus.Success, statusText: "" };
+    }
+}
+
+/** The extra servers and their initial state, for a vacuum whose options ask for them. */
+function rvcExtras(spec: EndpointSpec): { servers: unknown[]; state: Record<string, unknown> } {
+    const servers: unknown[] = [];
+    const state: Record<string, unknown> = {};
+    const areas = extractRvcAreas(spec.options, spec.indigoDeviceId);
+    if (areas !== undefined) {
+        servers.push(IndigoServiceAreaServer);
+        state.serviceArea = {
+            supportedAreas: areas.map(area => ({
+                areaId: area.areaId,
+                mapId: null,
+                areaInfo: {
+                    locationInfo: { locationName: area.name, floorNumber: null, areaType: null },
+                    landmarkInfo: null,
+                },
+            })),
+            selectedAreas: [],
+            supportedMaps: [],
+        };
+    }
+    const modes = extractRvcCleanModes(spec.options, spec.indigoDeviceId);
+    if (modes !== undefined) {
+        servers.push(IndigoRvcCleanModeServer);
+        state.rvcCleanMode = {
+            supportedModes: modes.map(mode => ({
+                label: RVC_CLEAN_MODE_DEFINITIONS[mode].label,
+                mode: cleanModeNumber(mode),
+                modeTags: [{ value: RVC_CLEAN_MODE_DEFINITIONS[mode].tag }],
+            })),
+            currentMode: cleanModeNumber(modes[0]!),
+        };
+    }
+    return { servers, state };
+}
+
+/**
+ * The composition-relevant part of a vacuum's options, normalised — what
+ * `standalone.ts` compares to decide whether a node must be rebuilt (the
+ * cluster set changes) and persists so a restart rebuilds the same thing.
+ */
+export function rvcFeatureOptions(spec: Pick<EndpointSpec, "options" | "indigoDeviceId">): Record<string, unknown> {
+    const result: Record<string, unknown> = {};
+    const areas = extractRvcAreas(spec.options, spec.indigoDeviceId);
+    if (areas !== undefined) {
+        result.areas = areas;
+    }
+    const modes = extractRvcCleanModes(spec.options, spec.indigoDeviceId);
+    if (modes !== undefined) {
+        result.cleanModes = modes;
+    }
+    return result;
+}
+
 function rvcDefaults(): Record<string, unknown> {
     return {
         // AudibleBeep tells an ecosystem what "identify" means on this device,
@@ -2818,7 +3036,14 @@ export function createEndpoint(spec: EndpointSpec, identity: BridgedIdentity): E
     // roles so an unrelated role's `options` (e.g. window-covering polarity)
     // is never even handed to {@link extractCtBounds}.
     const ctBounds = isCtRole(spec.role) ? extractCtBounds(spec.options, spec.indigoDeviceId) : undefined;
-    return new Endpoint(deviceTypeFor(definition, spec.battery) as never, {
+    // Rooms and cleaning modes (vacuum only) are chosen per export, so they are
+    // composed onto the device type here rather than fixed in the role table.
+    const extras = spec.role === Role.roboticVacuumCleaner ? rvcExtras(spec) : { servers: [], state: {} };
+    let deviceType = deviceTypeFor(definition, spec.battery);
+    if (extras.servers.length > 0) {
+        deviceType = (deviceType as unknown as MutableEndpoint).with(...(extras.servers as never[])) as never;
+    }
+    return new Endpoint(deviceType as never, {
         id: spec.publishedAs,
         ...mergeBehaviors(
             definition.standalone ? {} : { [BRIDGED_INFO]: bridgedInfoFor(spec, identity) },
@@ -2829,6 +3054,7 @@ export function createEndpoint(spec: EndpointSpec, identity: BridgedIdentity): E
             // this key never gets the attribute into `attributeList` at all,
             // so seeding it is not optional on a battery-flagged endpoint.
             spec.battery ? { [POWER_SOURCE]: { ...BATTERY_INITIAL, ...battery } } : {},
+            extras.state,
             patch,
             ctBounds !== undefined ? ctBoundsOverride(ctBounds, patch, initialState) : {},
         ),

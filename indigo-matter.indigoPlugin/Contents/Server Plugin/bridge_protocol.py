@@ -240,7 +240,10 @@ ROLE_COMMANDS = {
     # `stop` is Matter's "change to Idle": stop where you are. Going back to
     # the dock is `goHome`, a separate command on a separate cluster.
     # `locate` is Identify — Apple Home's "Play sound to locate".
-    "roboticVacuumCleaner": ("start", "stop", "pause", "resume", "goHome", "locate"),
+    # `selectAreas`/`setCleanMode` exist only when the export declares rooms /
+    # cleaning modes (§4.1 options.areas / options.cleanModes).
+    "roboticVacuumCleaner": ("start", "stop", "pause", "resume", "goHome", "locate",
+                             "selectAreas", "setCleanMode"),
 }
 
 #: The v1 role enum (§4.2) — derived, so a role can only exist with both of its
@@ -255,6 +258,10 @@ STANDALONE_ROLES = frozenset({"roboticVacuumCleaner"})
 RVC_OPERATIONAL_STATES = (
     "stopped", "running", "paused", "error", "seekingCharger", "charging", "docked",
 )
+
+#: §4.1 ``options.cleanModes`` domain for ``roboticVacuumCleaner``, in the
+#: node's own (mode-number) order.
+RVC_CLEAN_MODES = ("vacuum", "mop", "vacuumThenMop")
 
 #: The first bridge-node release that understands :data:`STANDALONE_ROLES`. An
 #: older node refuses the whole ``attach`` over an unknown role, which would

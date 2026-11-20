@@ -18,11 +18,16 @@ import { after, describe, it } from "node:test";
 import { Environment } from "@matter/main";
 import { IdentifyServer } from "@matter/main/behaviors/identify";
 import { RvcOperationalStateServer } from "@matter/main/behaviors/rvc-operational-state";
+import { RvcCleanModeServer } from "@matter/main/behaviors/rvc-clean-mode";
 import { RvcRunModeServer } from "@matter/main/behaviors/rvc-run-mode";
+import { ServiceAreaServer } from "@matter/main/behaviors/service-area";
+import { BasicInformationServer } from "@matter/main/behaviors/basic-information";
 import { Identify } from "@matter/main/clusters/identify";
 import { RvcOperationalState } from "@matter/main/clusters/rvc-operational-state";
 
 import {
+    extractRvcAreas,
+    extractRvcCleanModes,
     RVC_MODE_CLEANING,
     RVC_MODE_IDLE,
     rvcRunModeFor,
@@ -38,7 +43,7 @@ import {
     Role,
     RVC_OPERATIONAL_STATES,
 } from "../src/protocol.js";
-import { STANDALONE_FILE, STANDALONE_PRODUCT_ID, StandaloneHost } from "../src/standalone.js";
+import { STANDALONE_FILE, STANDALONE_PRODUCT_ID, StandaloneHost, standaloneNodeId } from "../src/standalone.js";
 import { closeSharedMdns, LOOPBACK, settleMatterWrites } from "./loopback.js";
 
 const SCRATCH_ROOT = process.env.INDIGO_MATTER_TEST_SCRATCH ?? tmpdir();
@@ -365,7 +370,10 @@ describe("StandaloneHost on a real matter.js node", () => {
         const h = harness();
         try {
             await h.host.reconcile([vacuumSpec()]);
+            const nodeDir = join(h.storagePath, standaloneNodeId(`indigo-${VACUUM}`));
+            assert.ok(existsSync(nodeDir), "the node has storage of its own");
             assert.deepEqual(await h.host.remove(VACUUM), { removed: true });
+            assert.equal(existsSync(nodeDir), false, "its fabrics and keys are gone with it");
             assert.deepEqual(h.host.records(), []);
             assert.deepEqual(await h.host.remove(VACUUM), { removed: false });
 
@@ -559,6 +567,149 @@ describe("BridgeNode routes standalone roles (ADR-0019)", () => {
             );
         } finally {
             await node.close();
+        }
+    });
+});
+
+
+describe("vacuum rooms and cleaning modes (Service Area, RVC Clean Mode)", () => {
+    const ROOMS = [{ areaId: 1, name: "Kitchen" }, { areaId: 7, name: "Hallway" }];
+
+    it("validates options.areas, treating anything unusable as absent", () => {
+        assert.deepEqual(extractRvcAreas({ areas: ROOMS }, 1), ROOMS);
+        assert.equal(extractRvcAreas({}, 1), undefined);
+        for (const bad of [
+            [], "Kitchen", [{ areaId: 1 }], [{ areaId: -1, name: "x" }], [{ areaId: 1.5, name: "x" }],
+            [{ areaId: 1, name: "  " }], [{ areaId: 1, name: "A" }, { areaId: 1, name: "B" }],
+            [{ areaId: 1, name: "Kitchen" }, { areaId: 2, name: "kitchen" }],
+        ]) {
+            assert.equal(extractRvcAreas({ areas: bad }, 1), undefined, JSON.stringify(bad));
+        }
+    });
+
+    it("validates options.cleanModes and keeps the node's own order", () => {
+        assert.deepEqual(extractRvcCleanModes({ cleanModes: ["mop", "vacuum"] }, 1), ["vacuum", "mop"]);
+        assert.deepEqual(
+            extractRvcCleanModes({ cleanModes: ["vacuumThenMop", "vacuum", "mop"] }, 1),
+            ["vacuum", "mop", "vacuumThenMop"],
+        );
+        for (const bad of [["vacuum"], ["vacuum", "vacuum"], ["vacuum", "steam"], ["vacuumThenMop"], "vacuum"]) {
+            assert.equal(extractRvcCleanModes({ cleanModes: bad }, 1), undefined, JSON.stringify(bad));
+        }
+    });
+
+    it("publishes no Service Area or Clean Mode unless asked", async () => {
+        const h = harness();
+        try {
+            await h.host.reconcile([vacuumSpec()]);
+            const endpoint = h.host.endpointFor(VACUUM);
+            assert.equal(!!endpoint?.behaviors.has("serviceArea" as never), false);
+            assert.equal(!!endpoint?.behaviors.has("rvcCleanMode" as never), false);
+        } finally {
+            await h.close();
+        }
+    });
+
+    it("publishes the rooms and reports a selection (empty = everywhere)", async () => {
+        const h = harness();
+        try {
+            await h.host.reconcile([vacuumSpec({ options: { areas: ROOMS } })]);
+            const endpoint = h.host.endpointFor(VACUUM);
+            assert.ok(endpoint);
+            const area = endpoint.stateOf(ServiceAreaServer) as unknown as {
+                supportedAreas: { areaId: number; areaInfo: { locationInfo: { locationName: string } } }[];
+            };
+            assert.deepEqual(
+                area.supportedAreas.map(entry => [entry.areaId, entry.areaInfo.locationInfo.locationName]),
+                [[1, "Kitchen"], [7, "Hallway"]],
+            );
+            await endpoint.act(agent => agent.get(ServiceAreaServer).selectAreas({ newAreas: [7, 1] }));
+            await endpoint.act(agent => agent.get(ServiceAreaServer).selectAreas({ newAreas: [] }));
+            assert.deepEqual(h.commands, [
+                { indigoDeviceId: VACUUM, command: "selectAreas", args: { areaIds: [7, 1] } },
+                { indigoDeviceId: VACUUM, command: "selectAreas", args: { areaIds: [] } },
+            ]);
+        } finally {
+            await h.close();
+        }
+    });
+
+    it("refuses a room the vacuum does not have, and reports nothing", async () => {
+        const h = harness();
+        try {
+            await h.host.reconcile([vacuumSpec({ options: { areas: ROOMS } })]);
+            const endpoint = h.host.endpointFor(VACUUM);
+            const result = await endpoint!.act(agent => agent.get(ServiceAreaServer).selectAreas({ newAreas: [99] }));
+            assert.notEqual((result as { status: number }).status, 0);
+            assert.deepEqual(h.commands, []);
+        } finally {
+            await h.close();
+        }
+    });
+
+    it("publishes cleaning modes, keeps the choice and reports it", async () => {
+        const h = harness();
+        try {
+            await h.host.reconcile([vacuumSpec({ options: { cleanModes: ["vacuum", "mop", "vacuumThenMop"] } })]);
+            const endpoint = h.host.endpointFor(VACUUM);
+            assert.ok(endpoint);
+            const modes = endpoint.stateOf(RvcCleanModeServer) as unknown as {
+                supportedModes: { label: string; mode: number }[];
+                currentMode: number;
+            };
+            assert.deepEqual(modes.supportedModes.map(mode => [mode.mode, mode.label]),
+                [[0, "Vacuum"], [1, "Mop"], [2, "Vacuum then mop"]]);
+            assert.equal(modes.currentMode, 0);
+            await endpoint.act(agent => agent.get(RvcCleanModeServer).changeToMode({ newMode: 1 }));
+            assert.equal((endpoint.stateOf(RvcCleanModeServer) as { currentMode: number }).currentMode, 1,
+                "a mode is a setting for the next run, so it is kept, not snapped back");
+            assert.deepEqual(h.commands, [{ indigoDeviceId: VACUUM, command: "setCleanMode", args: { mode: "mop" } }]);
+            const refused = await endpoint.act(agent => agent.get(RvcCleanModeServer).changeToMode({ newMode: 9 }));
+            assert.notEqual((refused as { status: number }).status, 0);
+            assert.equal(h.commands.length, 1);
+        } finally {
+            await h.close();
+        }
+    });
+
+    it("rebuilds the same node when rooms change, keeping pairings and bumping ConfigurationVersion", async () => {
+        const h = harness();
+        try {
+            await h.host.reconcile([vacuumSpec()]);
+            const passcode = h.host.records()[0]?.passcode;
+            const before = (h.host.serverFor(VACUUM)?.stateOf(BasicInformationServer) as { configurationVersion: number })
+                .configurationVersion;
+            await h.host.reconcile([vacuumSpec({ options: { areas: ROOMS } })]);
+            assert.equal(!!h.host.endpointFor(VACUUM)?.behaviors.has("serviceArea" as never), true);
+            assert.equal(h.host.records()[0]?.passcode, passcode);
+            const after = (h.host.serverFor(VACUUM)?.stateOf(BasicInformationServer) as { configurationVersion: number })
+                .configurationVersion;
+            assert.ok(after > before, `ConfigurationVersion ${before} -> ${after}`);
+
+            // An unchanged attach rebuilds nothing.
+            const server = h.host.serverFor(VACUUM);
+            await h.host.reconcile([vacuumSpec({ options: { areas: ROOMS } })]);
+            assert.equal(h.host.serverFor(VACUUM), server);
+        } finally {
+            await h.close();
+        }
+    });
+
+    it("restores the rooms on restart, before the plugin attaches", async () => {
+        const first = harness();
+        try {
+            await first.host.reconcile([vacuumSpec({ options: { areas: ROOMS, cleanModes: ["vacuum", "mop"] } })]);
+        } finally {
+            await first.close();
+        }
+        const second = harness(first.storagePath);
+        try {
+            await second.host.restore();
+            const endpoint = second.host.endpointFor(VACUUM);
+            assert.equal(!!endpoint?.behaviors.has("serviceArea" as never), true);
+            assert.equal(!!endpoint?.behaviors.has("rvcCleanMode" as never), true);
+        } finally {
+            await second.close();
         }
     });
 });

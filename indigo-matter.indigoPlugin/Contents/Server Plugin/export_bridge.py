@@ -1179,7 +1179,16 @@ class ExportBridge:
             # `ct_bounds.wire_options` for why "differs" is the gate: an
             # ordinary export must stay byte-identical to before this
             # existed, which the exact wire-frame round-trip tests pin).
-            options=ct_bounds.wire_options(entry.options),
+            # ADR-0019 — the vacuum's STORED keys (room text, action-group and
+            # variable ids) are the plugin's own record and never leave it;
+            # its handler sends the node-shaped `areas`/`cleanModes` instead.
+            # `ct_bounds.wire_options` passes unknown keys through, so they are
+            # stripped here rather than relying on every role to do it.
+            options={
+                **{key: value for key, value in ct_bounds.wire_options(entry.options).items()
+                   if key not in export_catalog.RVC_OPTION_KEYS},
+                **handler.wire_options(entry.options),
+            },
             # Issue #240/#246 — whatever identity the entry has adopted
             # (a role change or a migrate), or today's default derivation
             # for an entry that has never moved off it.

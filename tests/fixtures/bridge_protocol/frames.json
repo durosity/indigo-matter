@@ -51,7 +51,12 @@
     "same PairingReport/CommissioningWindowResult shapes as §3.7/§3.8.",
     "",
     "'command_locate' is Identify on a vacuum — Apple Home's 'Play sound to locate'.",
-    "'seconds' is the ecosystem's IdentifyTime; a cancel (0) is never reported."
+    "'seconds' is the ecosystem's IdentifyTime; a cancel (0) is never reported.",
+    "",
+    "'upsert_endpoint_vacuum_rooms' is the vacuum with rooms (Service Area) and cleaning modes",
+    "(RVC Clean Mode) declared in options. 'command_select_areas' and 'command_set_clean_mode'",
+    "are what an ecosystem's room pick and mode pick become; an empty areaIds is 'everywhere'.",
+    "Its endpointNumber is 1: a standalone node's device endpoint, not an aggregator child."
   ],
   "handshake": {
     "protocolVersion": 2,
@@ -1973,6 +1978,68 @@
       "command": "locate",
       "args": {
         "seconds": 10
+      }
+    }
+  },
+  "command_select_areas": {
+    "event": "command",
+    "data": {
+      "indigoDeviceId": 900021,
+      "command": "selectAreas",
+      "args": {
+        "areaIds": [
+          7,
+          1
+        ]
+      }
+    }
+  },
+  "command_set_clean_mode": {
+    "event": "command",
+    "data": {
+      "indigoDeviceId": 900021,
+      "command": "setCleanMode",
+      "args": {
+        "mode": "mop"
+      }
+    }
+  },
+  "upsert_endpoint_vacuum_rooms": {
+    "request": {
+      "message_id": "m96",
+      "command": "upsert_endpoint",
+      "args": {
+        "endpoint": {
+          "indigoDeviceId": 900021,
+          "role": "roboticVacuumCleaner",
+          "label": "Hallway Vacuum",
+          "reachable": true,
+          "states": {
+            "operationalState": "docked"
+          },
+          "options": {
+            "areas": [
+              {
+                "areaId": 1,
+                "name": "Kitchen"
+              },
+              {
+                "areaId": 7,
+                "name": "Hallway"
+              }
+            ],
+            "cleanModes": [
+              "vacuum",
+              "mop"
+            ]
+          }
+        }
+      }
+    },
+    "response": {
+      "message_id": "m96",
+      "result": {
+        "endpointNumber": 1
       }
     }
   }

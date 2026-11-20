@@ -781,7 +781,7 @@ ecosystem acts. Both are enumerated here in full; there is no other source.
 | `pressureSensor` | Pressure Sensor | `pressureKPa: float` | — |
 | `flowSensor` | Flow Sensor | `flowM3h: float` | — |
 | `thermostat` | Thermostat | `localTemperatureC: float`, `heatingSetpointC: float`, `coolingSetpointC: float`, `systemMode: str` | `setHeatingSetpoint {"valueC": float}`, `setCoolingSetpoint {"valueC": float}`, `setSystemMode {"mode": str}` |
-| `roboticVacuumCleaner` | Robotic Vacuum Cleaner (0x0074) — **standalone** (§3.12) | `operationalState: str` | `start {}`, `stop {}`, `pause {}`, `resume {}`, `goHome {}`, `locate {"seconds": int}` |
+| `roboticVacuumCleaner` | Robotic Vacuum Cleaner (0x0074) — **standalone** (§3.12) | `operationalState: str` | `start {}`, `stop {}`, `pause {}`, `resume {}`, `goHome {}`, `locate {"seconds": int}`; with rooms/modes declared (`options`, below): `selectAreas {"areaIds": [int]}`, `setCleanMode {"mode": str}` |
 
 - **`smokeAlarm` and `coAlarm` are two roles over one Matter device type, and
   the node writes an attribute the plugin never sends.** Smoke CO Alarm 0x0076
@@ -842,8 +842,28 @@ ecosystem acts. Both are enumerated here in full; there is no other source.
   attribute (PRD §7), and — like `lock`/`unlock` — each FAILS the invocation
   when the plugin is not connected, because "the vacuum started" is not
   something to tell a user about a machine nobody instructed. `batteryLevel`
-  (below) works as for any battery endpoint. RVC Clean Mode and Service Area
-  (rooms) are not published in this version.
+  (below) works as for any battery endpoint.
+- **Vacuum rooms and cleaning modes** are opt-in, declared in the spec's
+  `options` (§4.1): `"areas": [{"areaId": uint32, "name": str}]` — the
+  vacuum's OWN room ids, 1-64 rooms, ids and names unique — publishes Matter
+  **Service Area** (single map: `supportedMaps: []`, every `mapId` null);
+  `"cleanModes": [...]` — two or more of `"vacuum" | "mop" |
+  "vacuumThenMop"`, at least one of the first two — publishes **RVC Clean
+  Mode**, numbered in that fixed order so a mode number never moves. Anything
+  unusable is treated as absent with one warning (the `ctMinMireds` rule): a
+  refused attach would take every export offline over one bad room list.
+  An ecosystem's room pick becomes `selectAreas {"areaIds": [...]}` (empty =
+  everywhere; Apple Home sends it just before `start`), and a mode pick
+  becomes `setCleanMode {"mode": "mop"}`. **These two are the vacuum's
+  deliberate exceptions to never-auto-confirm:** a room selection and a
+  cleaning mode are settings for the NEXT run, not claims about the machine,
+  so the node keeps them (`selectedAreas`, `currentMode`) — most vacuum
+  plugins have nothing to confirm a mode from, and an unconfirmed one would
+  snap back in Home every time. `operationalState` still moves only on
+  `set_state`. Adding, changing or removing rooms or modes rebuilds the
+  vacuum's node in place (same storage, same pairings) and bumps its
+  `ConfigurationVersion` so ecosystems re-read it. `skipArea` is not
+  published (matter.js 0.17.8 has no server for it).
 - Thermostat **fan is not part of v1** (the Fan descope, PRD §5.2); there are
   no fan state keys or commands. v2 candidate.
 - Units are Indigo-natural at the protocol boundary (°C, %, lux, 0–100);

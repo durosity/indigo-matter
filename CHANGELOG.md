@@ -31,7 +31,13 @@ current version is `Info.plist`'s `PluginVersion`.
   `roboticVacuumCleaner` role, `get_standalone_pairing`,
   `open_standalone_window`, `reset_standalone`, and `StatusReport.standalone`
   (additive; no `protocolVersion` bump).
-- Not in this version: cleaning modes (vacuum / mop) and room selection.
+- **Rooms and cleaning modes (optional).** List the vacuum's rooms as
+  `id=name` using the ids from its own app's map (`1=Kitchen, 7=Hallway`), and
+  tick the cleaning modes it supports (Vacuum, Mop, Vacuum then mop). Apple
+  Home then offers room selection and modes ("vacuum the kitchen"). A choice
+  is written to Indigo variables you pick — room ids like `7,1` (empty means
+  everywhere) and the mode name — just before Start runs, so your Start
+  action group can pass them to your vacuum plugin's room-clean action.
 
 ## 2026.34.0 — Warn when matter-server is older than this plugin release expects
 

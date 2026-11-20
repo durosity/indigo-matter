@@ -88,7 +88,9 @@ accessory. One bridge, one pairing, however many devices.
   pair it with **Plugins ▸ Matter ▸ Pair Matter Vacuum…**, not by pairing the bridge.
   Start, stop, pause, resume, return-to-dock and "Play sound to locate" each run an
   Indigo action group you choose, so any vacuum plugin works; status and battery are read from its states.
-  Cleaning modes and room selection are not published yet. Not yet field-validated.
+  Optional rooms and cleaning modes (vacuum / mop) appear in Apple Home; a selection is
+  written to Indigo variables for your Start action group to pass to the vacuum plugin.
+  Field-validated on a Roomba for start/stop/dock; rooms not yet.
 - **Expect an "uncertified accessory" prompt** and choose *Add Anyway*. The bridge presents
   a development attestation certificate — as Homebridge, matterbridge and Home Assistant's
   bridge all do — and outbound attestation is the commissioning ecosystem's policy, not

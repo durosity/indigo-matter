@@ -185,7 +185,19 @@ RVC_ACTION_OPTIONS = {
     # find-me action simply leaves it unset, and Home's button does nothing.
     "locate": "rvcActionLocate",
 }
-RVC_OPTION_KEYS = (OPTION_RVC_STATE_KEY, OPTION_RVC_BATTERY_KEY, *RVC_ACTION_OPTIONS.values())
+#: Rooms and cleaning modes (Matter Service Area / RVC Clean Mode). Rooms are
+#: stored as the text the user typed — ``"1=Kitchen, 7=Hallway"``, ids being the
+#: VACUUM's own room/region ids — and parsed by ``export_handlers.parse_rooms``.
+#: A choice an ecosystem makes is written to the named Indigo VARIABLE (room ids
+#: comma-separated; a mode name), for the user's Start action group to pass on to
+#: their vacuum plugin: no vacuum plugin's room API is assumed.
+OPTION_RVC_ROOMS = "rvcRooms"
+OPTION_RVC_ROOMS_VARIABLE = "rvcRoomsVariable"
+OPTION_RVC_CLEAN_MODES = "rvcCleanModes"
+OPTION_RVC_MODE_VARIABLE = "rvcModeVariable"
+RVC_OPTION_KEYS = (OPTION_RVC_STATE_KEY, OPTION_RVC_BATTERY_KEY, *RVC_ACTION_OPTIONS.values(),
+                   OPTION_RVC_ROOMS, OPTION_RVC_ROOMS_VARIABLE, OPTION_RVC_CLEAN_MODES,
+                   OPTION_RVC_MODE_VARIABLE)
 
 #: Evidence a device is a robot vacuum, as **regexes**. Two haystacks with two
 #: bars, the shape of the binary-role name table: the identity strings (name,

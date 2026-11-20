@@ -463,6 +463,49 @@ A Matter pairing code is not durable: once used, or once the window expires (up 
                 <List class="self" method="getExportActionGroups" dynamicReload="true"/>
                 <Description>Apple Home's "Play sound to locate". Leave as none if your vacuum plugin has no find-me action.</Description>
             </Field>
+            <!-- Rooms and cleaning modes (Matter Service Area / RVC Clean Mode).
+                 A choice made in Apple Home is written to an Indigo variable
+                 for the Start action group to pass on to the vacuum plugin. -->
+            <Field id="exportRvcRoomsHelp" type="label" fontColor="darkgray"
+                   visibleBindingId="exportRole" visibleBindingValue="roboticVacuumCleaner"
+                   alwaysUseInDialogHeightCalc="true">
+                <Label>Optional — rooms and cleaning modes. List the rooms as id=name using the vacuum's OWN room ids (from its app's map), e.g. 1=Kitchen, 7=Hallway. When you pick rooms or a mode in Apple Home, the room ids (e.g. 7,1 — empty means everywhere) and the mode name are written to the variables below, then Start runs: have your Start action group pass them to your vacuum plugin.</Label>
+            </Field>
+            <Field id="exportRvcRooms" type="textfield"
+                   visibleBindingId="exportRole" visibleBindingValue="roboticVacuumCleaner"
+                   alwaysUseInDialogHeightCalc="true">
+                <Label>Rooms (id=name):</Label>
+            </Field>
+            <Field id="exportRvcRoomsVariable" type="menu" defaultValue="0"
+                   visibleBindingId="exportRole" visibleBindingValue="roboticVacuumCleaner"
+                   alwaysUseInDialogHeightCalc="true">
+                <Label>Rooms go into variable:</Label>
+                <List class="self" method="getExportVariables" dynamicReload="true"/>
+            </Field>
+            <Field id="exportRvcModeVacuum" type="checkbox" defaultValue="false"
+                   visibleBindingId="exportRole" visibleBindingValue="roboticVacuumCleaner"
+                   alwaysUseInDialogHeightCalc="true">
+                <Label>Cleaning modes:</Label>
+                <Description>Vacuum</Description>
+            </Field>
+            <Field id="exportRvcModeMop" type="checkbox" defaultValue="false"
+                   visibleBindingId="exportRole" visibleBindingValue="roboticVacuumCleaner"
+                   alwaysUseInDialogHeightCalc="true">
+                <Label></Label>
+                <Description>Mop</Description>
+            </Field>
+            <Field id="exportRvcModeVacuumThenMop" type="checkbox" defaultValue="false"
+                   visibleBindingId="exportRole" visibleBindingValue="roboticVacuumCleaner"
+                   alwaysUseInDialogHeightCalc="true">
+                <Label></Label>
+                <Description>Vacuum then mop (tick none for a vacuum that cannot mop)</Description>
+            </Field>
+            <Field id="exportRvcModeVariable" type="menu" defaultValue="0"
+                   visibleBindingId="exportRole" visibleBindingValue="roboticVacuumCleaner"
+                   alwaysUseInDialogHeightCalc="true">
+                <Label>Mode goes into variable:</Label>
+                <List class="self" method="getExportVariables" dynamicReload="true"/>
+            </Field>
             <Field id="exportAdd" type="button">
                 <Label></Label>
                 <Title>Add / update export</Title>

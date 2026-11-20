@@ -46,10 +46,17 @@ import { CommissioningFlowType, ManualPairingCodeCodec, QrPairingCodeCodec } fro
 import { BasicInformationServer } from "@matter/main/behaviors/basic-information";
 import { RoboticVacuumCleanerDevice } from "@matter/main/devices/robotic-vacuum-cleaner";
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 
-import { applyStates, type BridgedIdentity, createEndpoint, serialNumberFrom, watchCommands } from "./endpoints.js";
+import {
+    applyStates,
+    type BridgedIdentity,
+    createEndpoint,
+    rvcFeatureOptions,
+    serialNumberFrom,
+    watchCommands,
+} from "./endpoints.js";
 import {
     type CommandEventData,
     type CommissioningWindowResult,
@@ -103,6 +110,14 @@ export interface StandaloneRecord {
     battery: boolean;
     /** `false` = dormant: omitted by the last attach, storage and pairings kept. */
     active: boolean;
+    /**
+     * The composition-relevant options (rooms, cleaning modes), normalised by
+     * `rvcFeatureOptions`. Persisted so a restart rebuilds the SAME clusters
+     * before the plugin attaches — a vacuum whose rooms vanished for half a
+     * minute after every restart is the #141 failure in a new place. Absent
+     * in a record written before rooms existed, which reads as `{}`.
+     */
+    features?: Record<string, unknown>;
 }
 
 interface StandaloneFile {
@@ -144,7 +159,8 @@ function isUsableRecord(value: unknown): value is StandaloneRecord {
         typeof r.discriminator === "number" && Number.isInteger(r.discriminator) &&
         r.discriminator >= 0 && r.discriminator <= 0xfff &&
         typeof r.battery === "boolean" &&
-        typeof r.active === "boolean"
+        typeof r.active === "boolean" &&
+        (r.features === undefined || (typeof r.features === "object" && r.features !== null && !Array.isArray(r.features)))
     );
 }
 
@@ -270,7 +286,7 @@ export class StandaloneHost {
                     publishedAs: record.publishedAs,
                     reachable: false,
                     states: {},
-                    options: {},
+                    options: { ...(record.features ?? {}) },
                     battery: record.battery,
                 };
                 if (await this.start(record, spec)) {
@@ -371,7 +387,19 @@ export class StandaloneHost {
         }
     }
 
-    /** Wipe a node's fabrics and storage, then close it (ADR-0015). */
+    /**
+     * Close a node, then delete its storage — its fabrics, keys and endpoint
+     * numbers (ADR-0015).
+     *
+     * **Not `ServerNode.erase()`, deliberately.** `erase()` is a factory
+     * RESET: after wiping, matter.js 0.17.8 re-runs the node's construction
+     * (`eraseWithMutex` → `construction.start()`), which reopens its storage
+     * even when the node was taken offline first — and a `close()` racing that
+     * left the storage lock held until process exit (measured: four tests, one
+     * orphaned lock each). Destroying is not resetting: nothing should come
+     * back, so the node is closed while it is still a normal running node,
+     * and only then is its directory removed.
+     */
     private async destroy(live: LiveAccessory): Promise<void> {
         live.window.clear();
         try {
@@ -381,36 +409,29 @@ export class StandaloneHost {
         }
         this.#live.delete(live.record.indigoDeviceId);
         try {
-            await live.server.erase();
-        } catch (error) {
-            this.log(`erasing ${live.record.label} failed: ${describeError(error)}`);
-        }
-        try {
             await live.server.close();
         } catch (error) {
             this.log(`closing ${live.record.label} failed: ${describeError(error)}`);
         }
+        this.removeStorage(live.record);
     }
 
-    /**
-     * A dormant record's node is closed but its storage (and so its fabrics)
-     * is still on disk. Destroying it means opening that storage long enough
-     * to erase it — without ever bringing it online.
-     */
-    private async eraseDormant(record: StandaloneRecord): Promise<void> {
+    /** The node's own storage context — `storage.path` / its `ServerNode` id. */
+    private removeStorage(record: StandaloneRecord): void {
+        const dir = join(this.options.storagePath, standaloneNodeId(record.publishedAs));
         try {
-            const server = await ServerNode.create({
-                id: standaloneNodeId(record.publishedAs),
-                environment: this.options.environment,
-                network: { port: record.port },
-                commissioning: { passcode: record.passcode, discriminator: record.discriminator },
-                productDescription: { name: record.label, deviceType: RoboticVacuumCleanerDevice.deviceType },
-            });
-            await server.erase();
-            await server.close();
+            rmSync(dir, { recursive: true, force: true });
         } catch (error) {
-            this.log(`erasing dormant ${record.label} failed: ${describeError(error)}`);
+            const message = `could not delete ${dir} (${describeError(error)}); ${record.label}'s old ` +
+                "pairings may come back if the same accessory is exported again — delete it by hand";
+            this.#warnings.set(`erase:${record.publishedAs}`, message);
+            this.log(message);
         }
+    }
+
+    /** A dormant record's node is already closed: destroying it is deleting its storage. */
+    private eraseDormant(record: StandaloneRecord): void {
+        this.removeStorage(record);
     }
 
     async close(): Promise<void> {
@@ -479,12 +500,12 @@ export class StandaloneHost {
             if (live !== undefined) {
                 await this.destroy(live);
             } else {
-                await this.eraseDormant(record);
+                this.eraseDormant(record);
             }
             this.#records.delete(record.publishedAs);
             this.#warnings.delete(`bind:${record.publishedAs}`);
             this.persist();
-            this.log(`${record.label} removed; its node's fabrics and storage were erased`);
+            this.log(`${record.label} removed; its node's fabrics and storage were deleted`);
             return { removed: true };
         });
     }
@@ -540,6 +561,8 @@ export class StandaloneHost {
                 const stale = this.liveByPublishedAs(other.publishedAs);
                 if (stale !== undefined) {
                     await this.destroy(stale);
+                } else {
+                    this.eraseDormant(other);
                 }
                 this.#records.delete(other.publishedAs);
                 this.log(`${other.label}: identity ${other.publishedAs} superseded by ${spec.publishedAs}`);
@@ -557,6 +580,7 @@ export class StandaloneHost {
                 discriminator: generateDiscriminator(),
                 battery: spec.battery,
                 active: true,
+                features: rvcFeatureOptions(spec),
             };
             this.#records.set(record.publishedAs, record);
             this.persist();
@@ -564,8 +588,12 @@ export class StandaloneHost {
             return this.#live.get(record.indigoDeviceId);
         }
 
+        const features = rvcFeatureOptions(spec);
+        const featuresChanged = JSON.stringify(features) !== JSON.stringify(record.features ?? {});
         const needsRebuild =
-            record.role !== spec.role || (spec.battery && !record.battery) || record.indigoDeviceId !== spec.indigoDeviceId;
+            record.role !== spec.role || (spec.battery && !record.battery) ||
+            record.indigoDeviceId !== spec.indigoDeviceId || featuresChanged;
+        record.features = features;
         record.active = true;
         record.role = spec.role;
         record.battery = record.battery || spec.battery;
@@ -583,7 +611,14 @@ export class StandaloneHost {
         record.indigoDeviceId = spec.indigoDeviceId;
         if (live === undefined) {
             await this.start(record, spec);
-            return this.#live.get(record.indigoDeviceId);
+            const rebuilt = this.#live.get(record.indigoDeviceId);
+            if (featuresChanged && rebuilt?.online) {
+                // Rooms or modes appeared, changed or went: the cluster set
+                // moved, so tell paired ecosystems to re-read it rather than
+                // trust what they cached at pairing (Matter's own signal).
+                await this.bumpConfigurationVersion(rebuilt);
+            }
+            return rebuilt;
         }
 
         if (relabelled) {
@@ -594,6 +629,14 @@ export class StandaloneHost {
             await applyStates(live.endpoint, record.role, spec.states, record.battery, record.indigoDeviceId);
         }
         return live;
+    }
+
+    private async bumpConfigurationVersion(live: LiveAccessory): Promise<void> {
+        try {
+            await live.server.act(agent => agent.get(BasicInformationServer).increaseConfigurationVersion());
+        } catch (error) {
+            this.log(`${live.record.label}: could not bump ConfigurationVersion: ${describeError(error)}`);
+        }
     }
 
     // -- §3.12 pairing ---------------------------------------------------------
@@ -726,7 +769,7 @@ export class StandaloneHost {
                 publishedAs: record.publishedAs,
                 reachable: true,
                 states: {},
-                options: {},
+                options: { ...(record.features ?? {}) },
                 battery: record.battery,
             };
             await this.destroy(live);

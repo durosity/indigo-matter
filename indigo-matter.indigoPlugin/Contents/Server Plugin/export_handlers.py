@@ -498,6 +498,15 @@ class ExportHandler:
             states = {**states, STATE_BATTERY_LEVEL: percent}
         return states
 
+    def wire_options(self, _options: Optional[dict] = None) -> dict:
+        """§4.1 ``options`` this role sends, derived from its STORED options.
+
+        Empty for every role but the vacuum: what is stored is the plugin's own
+        record (often in a user-friendlier shape), and only what the node needs
+        goes on the wire — the ``ct_bounds.wire_options`` rule, per role.
+        """
+        return {}
+
     def has_battery(self, dev: Any, _options: Optional[dict] = None) -> bool:
         """§4.1 ``battery`` — whether this export has a battery to publish.
 
@@ -1596,6 +1605,47 @@ def _state_value(dev: Any, key: str) -> Any:
         return _MISSING
 
 
+#: Same caps as the node's ``extractRvcAreas`` — checked here so a bad list is
+#: refused in the dialog, while the user is looking, not ignored by the node.
+RVC_ROOMS_MAX = 64
+RVC_ROOM_NAME_MAX = 128
+_UINT32_MAX = 0xFFFFFFFF
+
+
+def parse_rooms(text: Any) -> list:
+    """``"1=Kitchen, 7=Hallway"`` → ``[(1, "Kitchen"), (7, "Hallway")]``.
+
+    Separated by commas, semicolons or new lines; ``=`` or ``:`` between id and
+    name. The id is the VACUUM's own room/region id (from its app's map), so it
+    is what the user's action group hands back to their vacuum plugin. Raises
+    ``ValueError`` naming the first problem; an empty text is ``[]`` (no rooms).
+    """
+    if not isinstance(text, str):
+        raise ValueError("rooms must be text like 1=Kitchen, 7=Hallway")
+    rooms: list = []
+    ids: set = set()
+    names: set = set()
+    for chunk in (part.strip() for part in text.replace(";", ",").replace("\n", ",").split(",")):
+        if not chunk:
+            continue
+        sep = "=" if "=" in chunk else ":" if ":" in chunk else None
+        if sep is None:
+            raise ValueError(f"{chunk!r} needs an id, like 1={chunk}")
+        raw_id, name = (piece.strip() for piece in chunk.split(sep, 1))
+        if not raw_id.isdigit() or int(raw_id) > _UINT32_MAX:
+            raise ValueError(f"{raw_id!r} is not a room id (a whole number)")
+        if not name or len(name) > RVC_ROOM_NAME_MAX:
+            raise ValueError(f"room {raw_id} needs a name")
+        if int(raw_id) in ids or name.lower() in names:
+            raise ValueError(f"room {raw_id} ({name}) repeats an id or a name")
+        ids.add(int(raw_id))
+        names.add(name.lower())
+        rooms.append((int(raw_id), name))
+    if len(rooms) > RVC_ROOMS_MAX:
+        raise ValueError(f"at most {RVC_ROOMS_MAX} rooms")
+    return rooms
+
+
 class _BatteryReading:
     """A minimal device stand-in so :func:`battery_percent` can judge a state value."""
 
@@ -1681,10 +1731,70 @@ class RoboticVacuumExport(ExportHandler):
         return isinstance(value, (int, float)) and not isinstance(value, bool)
 
     def commands(self) -> dict[str, Callable[[dict, Any, dict], Optional[str]]]:
-        return {
+        handlers: dict = {
             command: (lambda _args, dev, options, command=command: self._run(command, dev, options))
             for command in export_catalog.RVC_ACTION_OPTIONS
         }
+        handlers["selectAreas"] = self._select_areas
+        handlers["setCleanMode"] = self._set_clean_mode
+        return handlers
+
+    def wire_options(self, options: Optional[dict] = None) -> dict:
+        """Rooms and cleaning modes, in the node's §4.1 shape.
+
+        Stored as typed (``rvcRooms`` text, ``rvcCleanModes`` list); sent as
+        ``areas: [{areaId, name}]`` and ``cleanModes: [...]``. Unparseable rooms
+        are left OFF the wire rather than sent — the store refuses them, so this
+        only meets a hand-edit, and a vacuum with no rooms is better than an
+        attach the node has to reason about. Fewer than two modes is nothing to
+        choose between and is left off too (the node would ignore it anyway).
+        """
+        options = options or {}
+        wire: dict = {}
+        try:
+            rooms = parse_rooms(options.get(export_catalog.OPTION_RVC_ROOMS, ""))
+        except ValueError:
+            rooms = []
+        if rooms:
+            wire["areas"] = [{"areaId": area_id, "name": name} for area_id, name in rooms]
+        modes = options.get(export_catalog.OPTION_RVC_CLEAN_MODES)
+        if isinstance(modes, list) and len(modes) >= 2:
+            wire["cleanModes"] = list(modes)
+        return wire
+
+    @staticmethod
+    def _write_variable(options: dict, key: str, value: str, what: str) -> Optional[str]:
+        """Write ``value`` to the Indigo variable ``options[key]`` names, or say why not."""
+        variable_id = options.get(key)
+        if isinstance(variable_id, bool) or not isinstance(variable_id, int) or variable_id <= 0:
+            return (f"no Indigo variable is chosen for the {what} — choose one in Manage Matter "
+                    "Exports… so your Start action group can read it")
+        indigo.variable.updateValue(variable_id, value=value)
+        return None
+
+    def _select_areas(self, args: dict, _dev: Any, options: dict) -> Optional[str]:
+        """Rooms chosen in an ecosystem → ``"7,1"`` (empty = everywhere) in the rooms variable.
+
+        Written, not acted on: Apple Home sends the selection, THEN start, and
+        the start action group is what reads it. Ids not in the export's own
+        room list are dropped — the node already refuses them, so this is the
+        second line, not the first.
+        """
+        known = {area_id for area_id, _name in parse_rooms(options.get(export_catalog.OPTION_RVC_ROOMS, "") or "")}
+        raw = args.get("areaIds")
+        area_ids = [a for a in raw if isinstance(a, int) and not isinstance(a, bool) and a in known] \
+            if isinstance(raw, list) else []
+        return self._write_variable(options, export_catalog.OPTION_RVC_ROOMS_VARIABLE,
+                                    ",".join(str(a) for a in area_ids), "room selection")
+
+    def _set_clean_mode(self, args: dict, _dev: Any, options: dict) -> Optional[str]:
+        """Mode chosen in an ecosystem → its §4.1 name (``"mop"``) in the mode variable."""
+        mode = args.get("mode")
+        declared = options.get(export_catalog.OPTION_RVC_CLEAN_MODES) or []
+        if mode not in declared:
+            return f"cleaning mode {mode!r} is not one this vacuum declares"
+        return self._write_variable(options, export_catalog.OPTION_RVC_MODE_VARIABLE, str(mode),
+                                    "cleaning mode")
 
     @staticmethod
     def action_group_for(command: str, options: Optional[dict]) -> Optional[int]:

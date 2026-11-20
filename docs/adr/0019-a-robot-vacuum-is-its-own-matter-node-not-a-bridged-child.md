@@ -88,9 +88,13 @@ upgrade-order mistake costs the vacuum, not every export.
   commissioning witness). With one endpoint, always number 1, there is
   nothing to renumber, so the harm the witness prevents for the aggregator
   cannot happen here; the vacuum simply advertises for pairing again.
-* Neutral, because RVC Clean Mode and Service Area (room selection) are not
-  published in this version: Indigo has no common vocabulary for either.
-  Both are additive later.
+* Neutral, because rooms (Service Area) and cleaning modes (RVC Clean Mode)
+  are opt-in and plugin-agnostic: Indigo has no common vocabulary for either,
+  so the export declares them and a choice is handed to the user's Start
+  action group through Indigo variables rather than to any one vacuum
+  plugin's API. The node keeps a selection and a mode itself (a setting for
+  the next run, not a claim about the machine) — the one deliberate
+  exception to never-auto-confirm on this role.
 
 ### Confirmation
 

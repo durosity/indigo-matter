@@ -1803,10 +1803,28 @@ class TestPairMatterVacuum:
         return {"vacuumDevice": str(VACUUM), "duration": "900", "vacuumReset": False, **overrides}
 
     def test_the_menu_lists_only_standalone_exports(self, vacuum_plug):
-        assert vacuum_plug.getStandaloneExports() == [(str(VACUUM), "Hallway Vacuum")]
+        assert vacuum_plug.getStandaloneExports() == [
+            ("0", "(select a vacuum)"), (str(VACUUM), "Hallway Vacuum")]
 
     def test_the_menu_says_so_when_no_vacuum_is_exported(self, plug):
-        assert plug.getStandaloneExports() == [("", "— no robot vacuum is exported yet —")]
+        assert plug.getStandaloneExports() == [
+            ("0", "(no robot vacuum is exported yet — add one in Manage Matter Exports…)")]
+
+    @pytest.mark.parametrize("exported", [True, False])
+    def test_no_row_has_an_empty_value(self, plug, devices, exported):
+        """Indigo silently DROPS a popup option whose value is "" — which
+        rendered this menu blank in the field (2026-11-20)."""
+        if exported:
+            from fakes import CustomDevice
+            devices.add(CustomDevice(VACUUM, "Hallway Vacuum", states={"status": "idle"}))
+            plug.exports.upsert(ExportEntry(VACUUM, "roboticVacuumCleaner"))
+        assert all(value != "" for value, _label in plug.getStandaloneExports())
+
+    def test_the_no_selection_row_is_refused(self, vacuum_plug):
+        client = _bridge_with(vacuum_plug)
+        ok, _values, errors = vacuum_plug.menuPairMatterVacuum(self._values(vacuumDevice="0"))
+        assert ok is False and "vacuumDevice" in errors
+        client.get_standalone_pairing.assert_not_called()
 
     def test_a_never_paired_vacuum_logs_its_original_code_and_opens_nothing(self, vacuum_plug):
         client = _bridge_with(vacuum_plug)

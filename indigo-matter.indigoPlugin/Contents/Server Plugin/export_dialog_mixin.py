@@ -285,10 +285,10 @@ class ExportDialogMixin:
         values["exportCtWarmestKShown"] = ""
         values["exportCtCoolestKShown"] = ""
         values["exportCtBoundsSource"] = ""
-        values["exportRvcStateKey"] = ""
-        values["exportRvcBatteryKey"] = ""
+        values["exportRvcStateKey"] = ExportDialogMixin.RVC_AUTOMATIC
+        values["exportRvcBatteryKey"] = ExportDialogMixin.RVC_AUTOMATIC
         for field in ExportDialogMixin.RVC_ACTION_FIELDS:
-            values[field] = ""
+            values[field] = ExportDialogMixin.RVC_AUTOMATIC
         values["exportStatus"] = self._export_summary()
         return values
 
@@ -688,7 +688,12 @@ class ExportDialogMixin:
     # Robot vacuum fields (ADR-0019)
     # ------------------------------------------------------------------
     #: The menu value meaning "let the handler find it" / "no action group".
-    RVC_AUTOMATIC = ""
+    #: NOT the empty string: Indigo silently drops a popup option whose value
+    #: is ``""``, which took "Automatic" and "— none —" out of the menus.
+    #: ``"0"`` is :data:`NO_SELECTION_ID`, the value every other picker in
+    #: this plugin uses for "nothing chosen" — and no action group or state
+    #: is ever literally called ``0``.
+    RVC_AUTOMATIC = NO_SELECTION_ID
 
     #: Dialog field → the §4.2 command whose action group it holds.
     RVC_ACTION_FIELDS = {
@@ -708,10 +713,10 @@ class ExportDialogMixin:
         """
         options: dict = {}
         state_key = str(values.get("exportRvcStateKey", "") or "").strip()
-        if state_key:
+        if state_key and state_key != self.RVC_AUTOMATIC:
             options[export_catalog.OPTION_RVC_STATE_KEY] = state_key
         battery_key = str(values.get("exportRvcBatteryKey", "") or "").strip()
-        if battery_key:
+        if battery_key and battery_key != self.RVC_AUTOMATIC:
             options[export_catalog.OPTION_RVC_BATTERY_KEY] = battery_key
         for field, command in self.RVC_ACTION_FIELDS.items():
             raw = str(values.get(field, "") or "").strip()
@@ -722,8 +727,10 @@ class ExportDialogMixin:
     def _apply_rvc_fields(self, values: dict, options: Optional[dict]) -> None:
         """Fill (or blank) the vacuum fields from saved ``options``."""
         options = options or {}
-        values["exportRvcStateKey"] = str(options.get(export_catalog.OPTION_RVC_STATE_KEY, "") or "")
-        values["exportRvcBatteryKey"] = str(options.get(export_catalog.OPTION_RVC_BATTERY_KEY, "") or "")
+        values["exportRvcStateKey"] = str(options.get(export_catalog.OPTION_RVC_STATE_KEY)
+                                          or self.RVC_AUTOMATIC)
+        values["exportRvcBatteryKey"] = str(options.get(export_catalog.OPTION_RVC_BATTERY_KEY)
+                                            or self.RVC_AUTOMATIC)
         for field, command in self.RVC_ACTION_FIELDS.items():
             group = options.get(export_catalog.RVC_ACTION_OPTIONS[command])
             values[field] = str(group) if group else self.RVC_AUTOMATIC

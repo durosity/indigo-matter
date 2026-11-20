@@ -140,7 +140,15 @@ class PairingMenuMixin:
     # ------------------------------------------------------------------
     @degrades_to_list_error
     def getStandaloneExports(self, filter="", valuesDict=None, typeId="", targetId=0):  # noqa: N802, A002
-        """The exports that pair on their own (today: robot vacuums), for the menu."""
+        """The exports that pair on their own (today: robot vacuums), for the menu.
+
+        Every row carries a NON-EMPTY value: Indigo silently drops a popup
+        option whose value is ``""``, which rendered this menu blank when no
+        vacuum was exported (the placeholder vanished). The no-selection row
+        uses :data:`NO_SELECTION_ID`, as every other picker here does, and
+        leads the list so the dialog never opens with a vacuum pre-selected
+        under an "Unpair everywhere" tick-box.
+        """
         # pylint: disable=unused-argument,redefined-builtin
         entries = [entry for entry in (self.exports.all() if self.exports is not None else [])
                    if bridge_protocol.is_standalone_role(entry.role)]
@@ -152,8 +160,8 @@ class PairingMenuMixin:
                 name = f"device {entry.indigo_device_id}"
             rows.append((str(entry.indigo_device_id), entry.label_for(name)))
         if not rows:
-            return [("", "— no robot vacuum is exported yet —")]
-        return sorted(rows, key=lambda row: row[1].lower())
+            return [(NO_SELECTION_ID, "(no robot vacuum is exported yet — add one in Manage Matter Exports…)")]
+        return [(NO_SELECTION_ID, "(select a vacuum)")] + sorted(rows, key=lambda row: row[1].lower())
 
     def menuPairMatterVacuum(self, valuesDict, menuId=""):  # noqa: N802, ARG002
         # pylint: disable=too-many-return-statements,unused-argument
@@ -168,7 +176,7 @@ class PairingMenuMixin:
         """
         errors = indigo.Dict()
         raw = str((valuesDict or {}).get("vacuumDevice", "") or "").strip()
-        if not raw.isdigit():
+        if not raw.isdigit() or raw == NO_SELECTION_ID:
             errors["vacuumDevice"] = "Choose the vacuum to pair."
             return (False, valuesDict, errors)
         device_id = int(raw)

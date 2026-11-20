@@ -412,45 +412,45 @@ A Matter pairing code is not durable: once used, or once the window expires (up 
                    alwaysUseInDialogHeightCalc="true">
                 <Label>A robot vacuum is published as its OWN Matter accessory (Apple Home and Alexa cannot use one behind a bridge). After adding it here, pair it with Plugins ▸ Matter ▸ Pair Matter Vacuum… — pairing the bridge does not add it.</Label>
             </Field>
-            <Field id="exportRvcStateKey" type="menu" defaultValue=""
+            <Field id="exportRvcStateKey" type="menu" defaultValue="0"
                    visibleBindingId="exportRole" visibleBindingValue="roboticVacuumCleaner"
                    alwaysUseInDialogHeightCalc="true">
                 <Label>Status state:</Label>
                 <List class="self" method="getExportRvcStateKeys" dynamicReload="true"/>
                 <Description>Where the vacuum reports what it is doing (cleaning, docked, charging…).</Description>
             </Field>
-            <Field id="exportRvcBatteryKey" type="menu" defaultValue=""
+            <Field id="exportRvcBatteryKey" type="menu" defaultValue="0"
                    visibleBindingId="exportRole" visibleBindingValue="roboticVacuumCleaner"
                    alwaysUseInDialogHeightCalc="true">
                 <Label>Battery state:</Label>
                 <List class="self" method="getExportRvcBatteryKeys" dynamicReload="true"/>
             </Field>
-            <Field id="exportRvcStart" type="menu" defaultValue=""
+            <Field id="exportRvcStart" type="menu" defaultValue="0"
                    visibleBindingId="exportRole" visibleBindingValue="roboticVacuumCleaner"
                    alwaysUseInDialogHeightCalc="true">
                 <Label>Start runs:</Label>
                 <List class="self" method="getExportActionGroups" dynamicReload="true"/>
             </Field>
-            <Field id="exportRvcStop" type="menu" defaultValue=""
+            <Field id="exportRvcStop" type="menu" defaultValue="0"
                    visibleBindingId="exportRole" visibleBindingValue="roboticVacuumCleaner"
                    alwaysUseInDialogHeightCalc="true">
                 <Label>Stop runs:</Label>
                 <List class="self" method="getExportActionGroups" dynamicReload="true"/>
             </Field>
-            <Field id="exportRvcPause" type="menu" defaultValue=""
+            <Field id="exportRvcPause" type="menu" defaultValue="0"
                    visibleBindingId="exportRole" visibleBindingValue="roboticVacuumCleaner"
                    alwaysUseInDialogHeightCalc="true">
                 <Label>Pause runs:</Label>
                 <List class="self" method="getExportActionGroups" dynamicReload="true"/>
             </Field>
-            <Field id="exportRvcResume" type="menu" defaultValue=""
+            <Field id="exportRvcResume" type="menu" defaultValue="0"
                    visibleBindingId="exportRole" visibleBindingValue="roboticVacuumCleaner"
                    alwaysUseInDialogHeightCalc="true">
                 <Label>Resume runs:</Label>
                 <List class="self" method="getExportActionGroups" dynamicReload="true"/>
                 <Description>Leave as none to use the Start action group.</Description>
             </Field>
-            <Field id="exportRvcGoHome" type="menu" defaultValue=""
+            <Field id="exportRvcGoHome" type="menu" defaultValue="0"
                    visibleBindingId="exportRole" visibleBindingValue="roboticVacuumCleaner"
                    alwaysUseInDialogHeightCalc="true">
                 <Label>Return to dock runs:</Label>
@@ -527,7 +527,7 @@ The bridge only runs while at least one device is exported, so add something in 
 
 If the vacuum has never been paired, its original code is shown. Once paired, a new window is opened for each further ecosystem.</Label>
             </Field>
-            <Field id="vacuumDevice" type="menu">
+            <Field id="vacuumDevice" type="menu" defaultValue="0">
                 <Label>Vacuum:</Label>
                 <List class="self" method="getStandaloneExports" dynamicReload="true"/>
             </Field>

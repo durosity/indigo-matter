@@ -2752,7 +2752,7 @@ def vacuum(devices):
 
 
 def _rvc_values(device=VACUUM, **kwargs):
-    return _values(**{"exportDevice": str(device), **{field: "" for field in RVC_FIELDS}, **kwargs})
+    return _values(**{"exportDevice": str(device), **{field: "0" for field in RVC_FIELDS}, **kwargs})
 
 
 @pytest.mark.parametrize("field_id", ("exportRvcHelp",) + RVC_FIELDS)
@@ -2767,14 +2767,14 @@ def test_vacuum_fields_are_visible_only_for_the_vacuum_role(field_id):
 def test_the_vacuum_is_offered_as_the_default_role(plug, vacuum):  # noqa: ARG001
     values = plug.exportDeviceChanged(_rvc_values())
     assert values["exportRole"] == "roboticVacuumCleaner"
-    assert all(values[field] == "" for field in RVC_FIELDS), "a new export starts on automatic"
+    assert all(values[field] == "0" for field in RVC_FIELDS), "a new export starts on automatic"
 
 
 def test_the_state_menus_list_the_right_kinds_of_state(plug, vacuum):  # noqa: ARG001
     states = dict(plug.getExportRvcStateKeys(valuesDict=_rvc_values()))
     battery = dict(plug.getExportRvcBatteryKeys(valuesDict=_rvc_values()))
-    assert "" in states and "status" in states and "electricity_left" not in states
-    assert "" in battery and "electricity_left" in battery and "status" not in battery
+    assert "0" in states and "status" in states and "electricity_left" not in states
+    assert "0" in battery and "electricity_left" in battery and "status" not in battery
 
 
 def test_the_action_group_menu_offers_none_first(plug, mock_indigo_base):
@@ -2782,7 +2782,22 @@ def test_the_action_group_menu_offers_none_first(plug, mock_indigo_base):
     for group in mock_indigo_base.actionGroups:
         group.name = {12: "Vacuum: dock", 11: "Vacuum: clean"}[group.id]
     rows = plug.getExportActionGroups()
-    assert rows == [("", "— none —"), ("11", "Vacuum: clean"), ("12", "Vacuum: dock")]
+    assert rows == [("0", "— none —"), ("11", "Vacuum: clean"), ("12", "Vacuum: dock")]
+
+
+def test_no_vacuum_menu_offers_an_empty_value(plug, vacuum, mock_indigo_base):  # noqa: ARG001
+    """Indigo silently DROPS a popup option whose value is "" — which took
+    "Automatic" and "— none —" out of these menus in the field (2026-11-20)."""
+    mock_indigo_base.actionGroups = []
+    for rows in (plug.getExportRvcStateKeys(valuesDict=_rvc_values()),
+                 plug.getExportRvcBatteryKeys(valuesDict=_rvc_values()),
+                 plug.getExportActionGroups()):
+        assert rows and all(value != "" for value, _label in rows)
+
+
+def test_the_vacuum_menus_default_to_a_value_that_exists():
+    for field_id in RVC_FIELDS:
+        assert _menu_item().find(f".//Field[@id='{field_id}']").get("defaultValue") == "0"
 
 
 def test_saving_a_vacuum_stores_only_what_was_chosen(plug, vacuum):  # noqa: ARG001
@@ -2804,7 +2819,7 @@ def test_reopening_a_saved_vacuum_shows_its_choices(plug, vacuum):  # noqa: ARG0
     values = plug.exportDeviceChanged(_rvc_values())
     assert values["exportRvcBatteryKey"] == "electricity_left"
     assert values["exportRvcPause"] == "14"
-    assert values["exportRvcStart"] == ""
+    assert values["exportRvcStart"] == "0"
 
 
 def test_vacuum_options_never_ride_along_on_another_role(plug, vacuum):  # noqa: ARG001

@@ -111,7 +111,8 @@ CT_BOUNDS_ROLES = tuple(ct_bounds.CT_ROLES)
 #: (positive ints). See ``export_catalog.RVC_OPTION_KEYS``.
 OPTION_RVC_STATE_KEY = export_catalog.OPTION_RVC_STATE_KEY
 OPTION_RVC_BATTERY_KEY = export_catalog.OPTION_RVC_BATTERY_KEY
-RVC_ACTION_OPTION_KEYS = tuple(export_catalog.RVC_ACTION_OPTIONS.values())
+RVC_ACTION_OPTION_KEYS = (tuple(export_catalog.RVC_ACTION_OPTIONS.values())
+                          + tuple(export_catalog.RVC_MODE_ACTION_OPTIONS.values()))
 RVC_ROLES = (export_catalog.ROLE_ROBOTIC_VACUUM,)
 #: Positive int ids of Indigo VARIABLES (not action groups — same shape).
 RVC_VARIABLE_OPTION_KEYS = (export_catalog.OPTION_RVC_ROOMS_VARIABLE, export_catalog.OPTION_RVC_MODE_VARIABLE)

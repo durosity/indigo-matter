@@ -428,3 +428,44 @@ class TestRoomsAndModes:
             "cleanModes": ["vacuum", "mop"],
         }
         assert "rvcRooms" not in spec.options, "the stored text never leaves the plugin"
+
+
+class TestModeActionGroups:
+    BASE = {"rvcCleanModes": ["vacuum", "mop", "vacuumThenMop"]}
+
+    @pytest.mark.parametrize("mode, group", [("vacuum", 31), ("mop", 32), ("vacuumThenMop", 33)])
+    def test_each_mode_runs_its_own_action_group(self, handlers, mock_indigo_base, mode, group):
+        options = {**self.BASE, "rvcModeActionVacuum": 31, "rvcModeActionMop": 32,
+                   "rvcModeActionVacuumThenMop": 33}
+        assert handlers.handler_for(ROLE).dispatch("setCleanMode", {"mode": mode}, tuya_vacuum(), options) is True
+        mock_indigo_base.actionGroup.execute.assert_called_once_with(group)
+        mock_indigo_base.variable.updateValue.assert_not_called()
+
+    def test_variable_and_action_group_together_variable_first(self, handlers, mock_indigo_base):
+        """An action group that also reads the variable must see the NEW mode."""
+        calls = []
+        mock_indigo_base.variable.updateValue.side_effect = lambda *a, **k: calls.append("variable")
+        mock_indigo_base.actionGroup.execute.side_effect = lambda *a, **k: calls.append("group")
+        options = {**self.BASE, "rvcModeActionMop": 32, "rvcModeVariable": 502}
+        handlers.handler_for(ROLE).dispatch("setCleanMode", {"mode": "mop"}, tuya_vacuum(), options)
+        assert calls == ["variable", "group"]
+
+    def test_a_mode_with_neither_is_a_reasoned_no_op(self, handlers, mock_indigo_base):
+        outcome = handlers.handler_for(ROLE).dispatch(
+            "setCleanMode", {"mode": "mop"}, tuya_vacuum(), {**self.BASE, "rvcModeActionVacuum": 31})
+        assert isinstance(outcome, str) and "mop" in outcome
+        mock_indigo_base.actionGroup.execute.assert_not_called()
+
+    def test_the_store_accepts_mode_action_groups_and_refuses_junk(self):
+        ExportEntry.from_dict({"indigoDeviceId": VACUUM, "role": ROLE,
+                               "options": {**self.BASE, "rvcModeActionMop": 32}})
+        with pytest.raises(ValueError):
+            ExportEntry.from_dict({"indigoDeviceId": VACUUM, "role": ROLE,
+                                   "options": {**self.BASE, "rvcModeActionMop": "32"}})
+        with pytest.raises(ValueError, match="not a robot vacuum"):
+            ExportEntry.from_dict({"indigoDeviceId": VACUUM, "role": "onOffPlugInUnit",
+                                   "options": {"rvcModeActionMop": 32}})
+
+    def test_mode_action_groups_never_reach_the_wire(self, handlers):
+        wire = handlers.handler_for(ROLE).wire_options({**self.BASE, "rvcModeActionMop": 32})
+        assert wire == {"cleanModes": ["vacuum", "mop", "vacuumThenMop"]}

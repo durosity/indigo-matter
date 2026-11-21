@@ -1788,13 +1788,31 @@ class RoboticVacuumExport(ExportHandler):
                                     ",".join(str(a) for a in area_ids), "room selection")
 
     def _set_clean_mode(self, args: dict, _dev: Any, options: dict) -> Optional[str]:
-        """Mode chosen in an ecosystem → its §4.1 name (``"mop"``) in the mode variable."""
+        """Mode chosen in an ecosystem → run that mode's action group, and/or name it in the variable.
+
+        Either route alone is enough; both may be set (the variable written
+        first, so an action group that also reads it sees the new mode). With
+        neither, the change is a reasoned no-op — the node has already kept
+        the choice, so Home shows it, but nothing told the vacuum.
+        """
         mode = args.get("mode")
         declared = options.get(export_catalog.OPTION_RVC_CLEAN_MODES) or []
         if mode not in declared:
             return f"cleaning mode {mode!r} is not one this vacuum declares"
-        return self._write_variable(options, export_catalog.OPTION_RVC_MODE_VARIABLE, str(mode),
-                                    "cleaning mode")
+        group = self._positive_int(options.get(export_catalog.RVC_MODE_ACTION_OPTIONS[mode]))
+        variable = self._positive_int(options.get(export_catalog.OPTION_RVC_MODE_VARIABLE))
+        if group is None and variable is None:
+            return (f"neither an action group nor a variable is chosen for the {mode!r} cleaning "
+                    "mode — choose one in Manage Matter Exports…")
+        if variable is not None:
+            indigo.variable.updateValue(variable, value=str(mode))
+        if group is not None:
+            indigo.actionGroup.execute(group)
+        return None
+
+    @staticmethod
+    def _positive_int(value: Any) -> Optional[int]:
+        return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
 
     @staticmethod
     def action_group_for(command: str, options: Optional[dict]) -> Optional[int]:

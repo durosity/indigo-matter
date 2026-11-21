@@ -294,6 +294,8 @@ class ExportDialogMixin:
         values["exportRvcModeVariable"] = ExportDialogMixin.RVC_AUTOMATIC
         for field in ExportDialogMixin.RVC_MODE_FIELDS:
             values[field] = False
+        for field in ExportDialogMixin.RVC_MODE_ACTION_FIELDS:
+            values[field] = ExportDialogMixin.RVC_AUTOMATIC
         values["exportStatus"] = self._export_summary()
         return values
 
@@ -717,6 +719,13 @@ class ExportDialogMixin:
         "exportRvcModeVacuumThenMop": "vacuumThenMop",
     }
 
+    #: Dialog menu → the cleaning mode whose action group it holds.
+    RVC_MODE_ACTION_FIELDS = {
+        "exportRvcModeActionVacuum": "vacuum",
+        "exportRvcModeActionMop": "mop",
+        "exportRvcModeActionVacuumThenMop": "vacuumThenMop",
+    }
+
     def _rvc_rooms_error(self, values: dict) -> str:
         """Why the rooms/modes on screen cannot be saved, or ``""``.
 
@@ -762,6 +771,12 @@ class ExportDialogMixin:
         modes = [mode for field, mode in self.RVC_MODE_FIELDS.items() if self._truthy(values.get(field))]
         if modes:
             options[export_catalog.OPTION_RVC_CLEAN_MODES] = modes
+        # A mode's action group is kept only while the mode itself is ticked:
+        # an unticked mode can never be chosen, so its group could never run.
+        for field, mode in self.RVC_MODE_ACTION_FIELDS.items():
+            raw = str(values.get(field, "") or "").strip()
+            if mode in modes and raw.isdigit() and int(raw) > 0:
+                options[export_catalog.RVC_MODE_ACTION_OPTIONS[mode]] = int(raw)
         for field, key in (("exportRvcRoomsVariable", export_catalog.OPTION_RVC_ROOMS_VARIABLE),
                            ("exportRvcModeVariable", export_catalog.OPTION_RVC_MODE_VARIABLE)):
             raw = str(values.get(field, "") or "").strip()
@@ -783,6 +798,9 @@ class ExportDialogMixin:
         modes = options.get(export_catalog.OPTION_RVC_CLEAN_MODES) or []
         for field, mode in self.RVC_MODE_FIELDS.items():
             values[field] = mode in modes
+        for field, mode in self.RVC_MODE_ACTION_FIELDS.items():
+            group = options.get(export_catalog.RVC_MODE_ACTION_OPTIONS[mode])
+            values[field] = str(group) if group else self.RVC_AUTOMATIC
         for field, key in (("exportRvcRoomsVariable", export_catalog.OPTION_RVC_ROOMS_VARIABLE),
                            ("exportRvcModeVariable", export_catalog.OPTION_RVC_MODE_VARIABLE)):
             variable = options.get(key)

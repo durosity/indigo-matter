@@ -469,7 +469,7 @@ A Matter pairing code is not durable: once used, or once the window expires (up 
             <Field id="exportRvcRoomsHelp" type="label" fontColor="darkgray"
                    visibleBindingId="exportRole" visibleBindingValue="roboticVacuumCleaner"
                    alwaysUseInDialogHeightCalc="true">
-                <Label>Optional — rooms and cleaning modes. List the rooms as id=name using the vacuum's OWN room ids (from its app's map), e.g. 1=Kitchen, 7=Hallway. When you pick rooms or a mode in Apple Home, the room ids (e.g. 7,1 — empty means everywhere) and the mode name are written to the variables below, then Start runs: have your Start action group pass them to your vacuum plugin.</Label>
+                <Label>Optional — rooms and cleaning modes. List the rooms as id=name using the vacuum's OWN room ids (from its app's map), e.g. 1=Kitchen, 7=Hallway. When you pick rooms or a mode in Apple Home, the room ids (e.g. 7,1 — empty means everywhere) are written to the variable below, then Start runs: have your Start action group pass them to your vacuum plugin. A cleaning mode runs its own action group (and/or is written to a variable).</Label>
             </Field>
             <Field id="exportRvcRooms" type="textfield"
                    visibleBindingId="exportRole" visibleBindingValue="roboticVacuumCleaner"
@@ -500,10 +500,29 @@ A Matter pairing code is not durable: once used, or once the window expires (up 
                 <Label></Label>
                 <Description>Vacuum then mop (tick none for a vacuum that cannot mop)</Description>
             </Field>
+            <Field id="exportRvcModeActionVacuum" type="menu" defaultValue="0"
+                   visibleBindingId="exportRole" visibleBindingValue="roboticVacuumCleaner"
+                   alwaysUseInDialogHeightCalc="true">
+                <Label>Vacuum mode runs:</Label>
+                <List class="self" method="getExportActionGroups" dynamicReload="true"/>
+            </Field>
+            <Field id="exportRvcModeActionMop" type="menu" defaultValue="0"
+                   visibleBindingId="exportRole" visibleBindingValue="roboticVacuumCleaner"
+                   alwaysUseInDialogHeightCalc="true">
+                <Label>Mop mode runs:</Label>
+                <List class="self" method="getExportActionGroups" dynamicReload="true"/>
+            </Field>
+            <Field id="exportRvcModeActionVacuumThenMop" type="menu" defaultValue="0"
+                   visibleBindingId="exportRole" visibleBindingValue="roboticVacuumCleaner"
+                   alwaysUseInDialogHeightCalc="true">
+                <Label>Vacuum then mop runs:</Label>
+                <List class="self" method="getExportActionGroups" dynamicReload="true"/>
+                <Description>Runs as soon as the mode is changed in Apple Home. Only ticked modes are used.</Description>
+            </Field>
             <Field id="exportRvcModeVariable" type="menu" defaultValue="0"
                    visibleBindingId="exportRole" visibleBindingValue="roboticVacuumCleaner"
                    alwaysUseInDialogHeightCalc="true">
-                <Label>Mode goes into variable:</Label>
+                <Label>…and/or mode goes into variable:</Label>
                 <List class="self" method="getExportVariables" dynamicReload="true"/>
             </Field>
             <Field id="exportAdd" type="button">

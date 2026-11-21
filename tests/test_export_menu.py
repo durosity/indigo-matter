@@ -2872,3 +2872,27 @@ def test_a_bad_room_list_or_mode_set_is_refused_while_the_dialog_is_open(plug, v
     values = plug.exportAddOrUpdate(_rvc_values(exportRole="roboticVacuumCleaner", **extra))
     assert message in values["exportStatus"]
     assert plug.exports.get(VACUUM) is None, "nothing was saved"
+
+
+MODE_ACTION_FIELDS = ("exportRvcModeActionVacuum", "exportRvcModeActionMop", "exportRvcModeActionVacuumThenMop")
+
+
+@pytest.mark.parametrize("field_id", MODE_ACTION_FIELDS)
+def test_mode_action_menus_are_vacuum_only_and_default_to_none(field_id):
+    field = _menu_item().find(f".//Field[@id='{field_id}']")
+    assert field is not None
+    assert field.get("visibleBindingValue") == "roboticVacuumCleaner"
+    assert field.get("defaultValue") == "0"
+
+
+def test_mode_action_groups_save_only_for_ticked_modes(plug, vacuum):  # noqa: ARG001
+    plug.exportAddOrUpdate(_rvc_values(
+        exportRole="roboticVacuumCleaner", exportRvcModeVacuum=True, exportRvcModeMop=True,
+        exportRvcModeActionVacuum="31", exportRvcModeActionMop="32",
+        exportRvcModeActionVacuumThenMop="33"))   # not ticked → dropped
+    options = plug.exports.get(VACUUM).options
+    assert options["rvcModeActionVacuum"] == 31 and options["rvcModeActionMop"] == 32
+    assert "rvcModeActionVacuumThenMop" not in options
+    reopened = plug.exportDeviceChanged(_rvc_values())
+    assert reopened["exportRvcModeActionMop"] == "32"
+    assert reopened["exportRvcModeActionVacuumThenMop"] == "0"

@@ -195,9 +195,17 @@ OPTION_RVC_ROOMS = "rvcRooms"
 OPTION_RVC_ROOMS_VARIABLE = "rvcRoomsVariable"
 OPTION_RVC_CLEAN_MODES = "rvcCleanModes"
 OPTION_RVC_MODE_VARIABLE = "rvcModeVariable"
+#: Cleaning mode → the action group that switches the vacuum into it. Run the
+#: moment an ecosystem changes mode — the direct route, like every other vacuum
+#: command; the mode variable is the alternative for a single shared script.
+RVC_MODE_ACTION_OPTIONS = {
+    "vacuum": "rvcModeActionVacuum",
+    "mop": "rvcModeActionMop",
+    "vacuumThenMop": "rvcModeActionVacuumThenMop",
+}
 RVC_OPTION_KEYS = (OPTION_RVC_STATE_KEY, OPTION_RVC_BATTERY_KEY, *RVC_ACTION_OPTIONS.values(),
                    OPTION_RVC_ROOMS, OPTION_RVC_ROOMS_VARIABLE, OPTION_RVC_CLEAN_MODES,
-                   OPTION_RVC_MODE_VARIABLE)
+                   OPTION_RVC_MODE_VARIABLE, *RVC_MODE_ACTION_OPTIONS.values())
 
 #: Evidence a device is a robot vacuum, as **regexes**. Two haystacks with two
 #: bars, the shape of the binary-role name table: the identity strings (name,

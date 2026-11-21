@@ -34,10 +34,11 @@ current version is `Info.plist`'s `PluginVersion`.
 - **Rooms and cleaning modes (optional).** List the vacuum's rooms as
   `id=name` using the ids from its own app's map (`1=Kitchen, 7=Hallway`), and
   tick the cleaning modes it supports (Vacuum, Mop, Vacuum then mop). Apple
-  Home then offers room selection and modes ("vacuum the kitchen"). A choice
-  is written to Indigo variables you pick — room ids like `7,1` (empty means
-  everywhere) and the mode name — just before Start runs, so your Start
-  action group can pass them to your vacuum plugin's room-clean action.
+  Home then offers room selection and modes ("vacuum the kitchen"). Each
+  cleaning mode runs its own action group the moment it is chosen (and/or its
+  name is written to a variable). A room selection is written to an Indigo
+  variable — room ids like `7,1`, empty meaning everywhere — just before Start
+  runs, so your Start action group can pass it to your vacuum plugin.
 
 ## 2026.34.0 — Warn when matter-server is older than this plugin release expects
 

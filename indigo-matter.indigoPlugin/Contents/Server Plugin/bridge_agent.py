@@ -44,6 +44,7 @@ from __future__ import annotations
 import os
 import subprocess
 import time
+from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
 from launch_agent import AgentSpec, LaunchAgent, expand_home
@@ -119,6 +120,63 @@ def default_controller_storage(home: str) -> str:
     return expand_home(f"~/Library/Application Support/{CONTROLLER_LABEL}/matter-server", home)
 
 
+#: Port strides for multi-bridge (docs/MULTI-BRIDGE.md). The Matter port steps
+#: by 10 because each node puts its standalone accessories (vacuums) on the
+#: ports just above its own; the protocol (TCP) port steps by 1.
+MATTER_PORT_STRIDE = 10
+WS_PORT_STRIDE = 1
+
+
+@dataclass(frozen=True)
+class BridgeInstance:
+    """One bridge node's OWN resources — the multi-bridge fork's unit.
+
+    Everything two bridge nodes would otherwise share: the launchd label (also
+    the plist filename and the applied-digest stamp), the storage dir (SACRED:
+    fabrics + endpoint-number witness), both ports, and the log filenames. The
+    stray-process reaper matches on storage path and protocol port, so distinct
+    values here are what keep one bridge's reaper off another bridge's node.
+    """
+
+    label: str
+    storage_path: str
+    matter_port: str
+    ws_port: str
+    out_log: str
+    err_log: str
+
+
+def bridge_instance(device_id: int, slot: int, home: Optional[str] = None) -> BridgeInstance:
+    """The resources for the bridge DEVICE ``device_id`` in port ``slot`` (0, 1, …).
+
+    Derived, never stored, from two persisted inputs: the device id (stable for
+    the device's life) and its slot (allocated once, kept in the device's
+    props). Storage hangs off the same root as the legacy single bridge's
+    (``…/<controller label>/bridges/<id>``), so a fabric backup that archives
+    the root finds every bridge.
+    """
+    if not isinstance(device_id, int) or isinstance(device_id, bool) or device_id <= 0:
+        raise ValueError(f"bridge device id must be a positive int, not {device_id!r}")
+    if not isinstance(slot, int) or isinstance(slot, bool) or slot < 0:
+        raise ValueError(f"bridge slot must be a non-negative int, not {slot!r}")
+    resolved_home = home or os.path.expanduser("~")
+    root = os.path.dirname(os.path.normpath(default_controller_storage(resolved_home)))
+    return BridgeInstance(
+        label=f"{LABEL}.{device_id}",
+        storage_path=os.path.join(root, "bridges", str(device_id)),
+        matter_port=str(int(DEFAULT_MATTER_PORT) + MATTER_PORT_STRIDE * slot),
+        ws_port=str(int(bridge_protocol_default_ws_port()) + WS_PORT_STRIDE * slot),
+        out_log=f"bridge-{device_id}.log",
+        err_log=f"bridge-{device_id}.err.log",
+    )
+
+
+def bridge_protocol_default_ws_port() -> str:
+    """``bridge_protocol.DEFAULT_WS_PORT``, imported late (see BridgeProcess.__init__)."""
+    import bridge_protocol  # pylint: disable=import-outside-toplevel
+    return bridge_protocol.DEFAULT_WS_PORT
+
+
 def _port_str(value: Any, fallback: str) -> str:
     """A port as a non-empty numeric string, or ``fallback``.
 
@@ -179,6 +237,7 @@ class BridgeProcess(LaunchAgent):
         runner: Callable[..., "subprocess.CompletedProcess"] = subprocess.run,
         exists: Callable[[str], bool] = os.path.exists,
         sleep: Callable[[float], None] = time.sleep,
+        instance: Optional[BridgeInstance] = None,
     ) -> None:
         # Resolved before super() because the storage path the spec carries
         # expands against it — the same ordering ServerProcess uses.
@@ -195,15 +254,24 @@ class BridgeProcess(LaunchAgent):
 
         ws_port = _port_str(prefs.get(bridge_protocol.PREF_WS_PORT),
                             bridge_protocol.DEFAULT_WS_PORT)
+        # Multi-bridge: an instance REPLACES every per-node resource. The port
+        # prefs are deliberately ignored then — they are the legacy single
+        # bridge's escape hatch, and applying one pref to N bridges would put
+        # them all on the same port.
+        label, out_log, err_log = LABEL, BRIDGE_OUT_LOG, BRIDGE_ERR_LOG
+        matter_port = _port_str(prefs.get(PREF_MATTER_PORT), DEFAULT_MATTER_PORT)
+        if instance is not None:
+            label, out_log, err_log = instance.label, instance.out_log, instance.err_log
+            storage_path, ws_port, matter_port = instance.storage_path, instance.ws_port, instance.matter_port
         super().__init__(
             AgentSpec(
-                label=LABEL,
+                label=label,
                 package=BRIDGE_PACKAGE,
                 install_spec=DEFAULT_INSTALL_SPEC,
                 default_entry=DEFAULT_BRIDGE_ENTRY,
                 storage_path=storage_path,
-                out_log=BRIDGE_OUT_LOG,
-                err_log=BRIDGE_ERR_LOG,
+                out_log=out_log,
+                err_log=err_log,
                 argv=bridge_arguments,
                 # The loopback protocol port, NOT the Matter UDP port: the
                 # orphan reaper's port signal is an `lsof -iTCP` match, and the
@@ -229,7 +297,8 @@ class BridgeProcess(LaunchAgent):
             runner=runner, exists=exists, sleep=sleep,
         )
         self._ws_port = ws_port
-        self._matter_port = _port_str(prefs.get(PREF_MATTER_PORT), DEFAULT_MATTER_PORT)
+        self._matter_port = matter_port
+        self.instance = instance
         self.mdns_interface = str(prefs.get(PREF_PRIMARY_INTERFACE) or "").strip()
 
     @property

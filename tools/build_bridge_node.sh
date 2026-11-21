@@ -10,7 +10,7 @@ set -eu
 here="$(cd "$(dirname "$0")/.." && pwd)"
 dest="$here/Matter Prototype.indigoPlugin/Contents/Server Plugin/bridge_node"
 cd "$here/bridge-node"
-npm ci --no-audit --no-fund
+npm ci --include=dev --no-audit --no-fund
 npm test
 npm run clean
 npm run build

@@ -939,7 +939,7 @@ class Plugin(HttpApiMixin, ExportDialogMixin, PairingMenuMixin, MatterServerMenu
         if self.runtime is not None and not self.runtime.is_running:
             self.logger.warning("async runtime is not running")
             return
-        if self.matter is not None and not self.matter.connected:
+        if self.matter is not None and not fork_identity.EXPORT_ONLY and not self.matter.connected:
             ticks = getattr(self, "_disconnect_ticks", 0) + 1
             self._disconnect_ticks = ticks
             # debug each ~15s tick, but warn once it's been down ~1 min so a

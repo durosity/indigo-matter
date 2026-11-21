@@ -182,6 +182,17 @@ Done (each commit tested in full before landing; suite about 4650 passing):
   Bridge, Unpair and Reset menu items are gone. Still in the menu with a Bridge
   popup: Pair Vacuum, Stop Bridge Node, Rebuild Endpoint Map, Migrate Export;
   fabric backup/restore and CT calibration still act on the built-in bridge.
+- step 4b — robustness (`step4b.py`): accessory names are cut to Matter's
+  32-byte NodeLabel limit (`export_bridge.matter_label`, warned once; the dialog
+  says what it will show as) — a 36-character name made the node reject the
+  accessory and then refuse the whole attach. A NEWLY added accessory the node
+  refuses (`internal`) is quarantined (`matterExportQuarantine`, per bridge,
+  migrated with the rest) and left out of every attach until saved again or
+  removed; live ones never are (leaving them out would remove them). The
+  node itself still aborts an attach on any refused endpoint — the real fix is
+  per-endpoint tolerance in `bridge-node/src/registry.ts`, which means the fork
+  shipping its own node build. Also: the state picker's Auto row has a real id
+  (`_auto`), and the matter-server watchdog is quiet in the export-only build.
 - Known gaps, by design for now: device bridges ignore the global "Enable Matter export" switch (absent `exportEnabled` reads
   as on); fabric backup/restore and CT calibration act on the legacy bridge
   only; no "on bridge X" exclusion yet, so one device CAN be on two bridges

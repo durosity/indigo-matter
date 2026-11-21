@@ -44,7 +44,8 @@ from export_store import ExportStore
 MIGRATION_PREF = "legacyBridgeMigration"
 #: Every setting the built-in bridge keeps for ITSELF (the rest are global).
 LEGACY_BRIDGE_KEYS = (export_store.PREF_KEY, export_store.PREF_KEY_CORRUPT,
-                      export_bridge.PREF_PENDING_REPLACE_ALL, "exportParked")
+                      export_bridge.PREF_PENDING_REPLACE_ALL, "exportParked",
+                      export_bridge.PREF_QUARANTINE)
 
 
 def _bridge_device_or_none(device_id: int):

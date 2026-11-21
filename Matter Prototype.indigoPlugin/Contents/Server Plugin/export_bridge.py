@@ -80,6 +80,19 @@ from bridge_health import (  # pylint: disable=unused-import
     describe_fabric)
 from bridge_protocol import EndpointSpec, published_id_for
 
+#: Matter's limit on a bridged accessory's NodeLabel, in UTF-8 bytes.
+MATTER_LABEL_MAX_BYTES = 32
+#: Per-bridge pref: newly added accessories the node refused (JSON {id: reason}).
+PREF_QUARANTINE = "matterExportQuarantine"
+
+
+def matter_label(label: str) -> str:
+    """``label`` cut to Matter's 32-byte limit, never splitting a character."""
+    raw = str(label).encode("utf-8")
+    if len(raw) <= MATTER_LABEL_MAX_BYTES:
+        return str(label)
+    return raw[:MATTER_LABEL_MAX_BYTES].decode("utf-8", errors="ignore").rstrip()
+
 #: Deadline for ONE §5 command dispatch, in seconds. Generous: an Indigo device
 #: command is a synchronous IPC round trip that may itself be waiting on a radio,
 #: and a bridge that gave up early would report a failure the house then went and
@@ -943,7 +956,10 @@ class ExportBridge:
         """
         entries = self._store.all()
         specs = []
+        quarantined = self.quarantined()
         for entry in entries:
+            if entry.indigo_device_id in quarantined:
+                continue  # refused by the node when added; warned then, kept out of every attach
             spec = self._spec_for(entry)
             if spec is not None:
                 specs.append(spec)
@@ -1170,7 +1186,7 @@ class ExportBridge:
         return EndpointSpec(
             indigo_device_id=device_id,
             role=entry.role,
-            label=entry.label_for(str(getattr(dev, "name", "") or "")),
+            label=self._matter_label(device_id, entry.label_for(str(getattr(dev, "name", "") or ""))),
             reachable=reachable_of(dev),
             states=states,
             # Issue #293 — the wire never sees the plugin's own seed/learned
@@ -1477,10 +1493,86 @@ class ExportBridge:
         entry = self._store.get(device_id)
         if entry is None:
             return
+        self._unquarantine(device_id)  # saved again: give it another go
+        was_live = device_id in self._pushed
         spec = self._spec_for(entry)
         if spec is None:
             return
-        self._fire(client.upsert_endpoint(spec), f"upsert_endpoint dev {device_id}")
+
+        async def guarded():
+            try:
+                return await client.upsert_endpoint(spec)
+            except Exception as exc:
+                self._note_upsert_failure(device_id, was_live, exc)
+                raise
+
+        self._fire(guarded(), f"upsert_endpoint dev {device_id}")
+
+    # ------------------------------------------------------------------
+    # Step 4b (private fork): names Matter accepts; refused accessories
+    # ------------------------------------------------------------------
+    def _matter_label(self, device_id: int, label: str) -> str:
+        clipped = matter_label(label)
+        if clipped != label:
+            warned = self.__dict__.setdefault("_label_clip_warned", set())
+            if device_id not in warned:
+                warned.add(device_id)
+                self._logger.warning(
+                    'Matter bridge: "%s" is longer than Matter allows for an accessory name (%d bytes), '
+                    'so it is published as "%s". Give it a shorter published name to choose the wording.',
+                    label, MATTER_LABEL_MAX_BYTES, clipped)
+        return clipped
+
+    def quarantined(self) -> dict:
+        """Newly added accessories the node refused: {device id: reason}."""
+        import json  # pylint: disable=import-outside-toplevel
+        try:
+            raw = json.loads(self._prefs_getter().get(PREF_QUARANTINE, "") or "{}")
+        except (TypeError, ValueError, AttributeError):
+            return {}
+        result = {}
+        for key, reason in (raw.items() if isinstance(raw, dict) else ()):
+            try:
+                result[int(key)] = str(reason)
+            except (TypeError, ValueError):
+                continue
+        return result
+
+    def _write_quarantine(self, quarantined: dict) -> None:
+        import json  # pylint: disable=import-outside-toplevel
+        prefs = self._prefs_getter()
+        if quarantined:
+            prefs[PREF_QUARANTINE] = json.dumps({str(k): v for k, v in sorted(quarantined.items())})
+        elif PREF_QUARANTINE in prefs:
+            del prefs[PREF_QUARANTINE]
+        else:
+            return
+        self._save_prefs()
+
+    def _unquarantine(self, device_id: int) -> None:
+        quarantined = self.quarantined()
+        if quarantined.pop(device_id, None) is not None:
+            self._write_quarantine(quarantined)
+
+    def _note_upsert_failure(self, device_id: int, was_live: bool, exc: BaseException) -> None:
+        """A NEW accessory the node refused is kept out of attaches until saved again.
+
+        Only new ones: an accessory that was already live keeps its endpoint
+        (the node rolls a failed update back), and leaving IT out of an
+        attach would remove it — and its rooms and automations — from every
+        ecosystem. Only the node's ``internal`` refusals count: a timeout or a
+        dropped socket says nothing about the accessory itself.
+        """
+        if was_live or str(getattr(exc, "code", "")) != bridge_protocol.ERR_INTERNAL:
+            return
+        self._pushed.pop(device_id, None)
+        quarantined = self.quarantined()
+        quarantined[device_id] = str(getattr(exc, "details", "") or exc)
+        self._write_quarantine(quarantined)
+        self._logger.error(
+            "Matter bridge: the bridge node refused the newly added accessory %s (%s). It is left out "
+            "of this bridge so the others keep working; change its export settings and save it again "
+            "to retry, or remove it.", device_id, quarantined[device_id])
 
     def remove(self, device_id: int) -> None:
         """Drop one endpoint (§3.3). Fire-and-forget; idempotent on the node.
@@ -1506,6 +1598,7 @@ class ExportBridge:
         # export, or a device_id later reused by a deleted-and-recreated
         # Indigo device would inherit evidence about different hardware.
         self._ct_learner.forget(device_id)
+        self._unquarantine(device_id)
         client = self._live_client("remove_endpoint", device_id)
         if client is None:
             return

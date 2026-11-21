@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Any, Optional
 
 import json
+from export_bridge import MATTER_LABEL_MAX_BYTES, matter_label  # step 4b
 import indigo  # provided by the Indigo runtime
 
 import export_catalog
@@ -471,6 +472,10 @@ class ExportDialogMixin:
             return [(NO_SELECTION_ID, "(plugin still starting)")]
         options = []
         failures = 0
+        bridge = self.export_bridge
+        quarantined = bridge.quarantined() if hasattr(bridge, "quarantined") else {}
+        if not isinstance(quarantined, dict):
+            quarantined = {}
         for entry in self.exports.all():
             try:
                 dev = self._indigo_device(entry.indigo_device_id)
@@ -482,6 +487,8 @@ class ExportDialogMixin:
                     label += f' · shown as "{entry.name_override}"'
                 if entry.options.get(OPTION_INVERT):
                     label += " · inverted"
+                if entry.indigo_device_id in quarantined:
+                    label += " · REFUSED by the bridge node (see the event log)"
                 label += self._ct_bounds_row_note(entry)
                 options.append((str(entry.indigo_device_id), label))
             except Exception as exc:  # pylint: disable=broad-except
@@ -556,6 +563,8 @@ class ExportDialogMixin:
         menu empty until the user has answered the question that unlocks it.
         """
         key = str(values.get("exportStateKey", "") or "").strip()
+        if key == self.AUTO_STATE_KEY:
+            key = ""
         if not key:
             return {}
         options = {OPTION_STATE_KEY: key}
@@ -718,7 +727,7 @@ class ExportDialogMixin:
             auto = "Auto (sensor value)"
         else:
             auto = "Auto"
-        return [("", auto)] + [(key, key) for key in binary] + [(key, key) for key in others]
+        return [(self.AUTO_STATE_KEY, auto)] + [(key, key) for key in binary] + [(key, key) for key in others]
 
     # ------------------------------------------------------------------
     # Robot vacuum fields (ADR-0019)
@@ -1288,6 +1297,11 @@ class ExportDialogMixin:
     # ------------------------------------------------------------------
     # Step 3a (private fork): Publish checkbox, kept settings, list editing
     # ------------------------------------------------------------------
+    #: The state picker's "Auto" row. Indigo discards a list row whose id is
+    #: empty, so Auto needs a real one; everything that reads the picker maps
+    #: it back to "no state chosen".
+    AUTO_STATE_KEY = "_auto"
+
     #: Where unpublished-but-kept exports live, per bridge (JSON: id → entry).
     PARKED_PREF = "exportParked"
 
@@ -1344,6 +1358,8 @@ class ExportDialogMixin:
         except Exception:  # pylint: disable=broad-except
             states = {}
         key = str(values.get("exportStateKey", "") or "").strip()
+        if key == self.AUTO_STATE_KEY:
+            key = ""
         if key and key not in states:
             key = ""  # a stale pick from another device: Auto
         native = export_catalog.classify(dev, self._export_plugin_id(), mapping)
@@ -1400,6 +1416,11 @@ class ExportDialogMixin:
         if kind == "device" and self.exports is not None and self.exports.get(device_id) is not None:
             self._unpark(device_id)
             values["exportPublish"] = True
+            shown = str(values.get("exportName", "") or "").strip() or indigo_name
+            if matter_label(shown) != shown:
+                values["exportStatus"] = (str(values.get("exportStatus", "") or "")
+                                          + f' Matter allows {MATTER_LABEL_MAX_BYTES} bytes for a name, so it '
+                                            f'shows as "{matter_label(shown)}".')
         return values
 
     def _unpublish_export(self, values, device_id: int, name: str):

@@ -133,7 +133,8 @@ def test_excluded_and_unmapped_devices_stay_excluded(plug, devices):
 
 def test_the_state_picker_starts_with_auto(plug):
     rows = plug.getExportStateKeys(valuesDict={"exportDevice": "101"})
-    assert rows[0] == ("", "Auto (on/off state)") and ("onOffState", "onOffState") in rows
+    assert rows[0] == ("_auto", "Auto (on/off state)") and ("onOffState", "onOffState") in rows
+    assert all(key for key, _ in rows), "Indigo discards a row with an empty id"
 
 
 @pytest.mark.parametrize("role, options", [

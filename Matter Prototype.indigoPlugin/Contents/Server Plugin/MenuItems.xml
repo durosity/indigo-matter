@@ -317,6 +317,10 @@ A Matter pairing code is not durable: once used, or once the window expires (up 
                 <CallbackMethod>exportDeviceChanged</CallbackMethod>
                 <Description>A ● marks a device that is already exported.</Description>
             </Field>
+            <Field id="exportPublish" type="checkbox" defaultValue="true">
+                <Label>Publish device:</Label>
+                <Description>Make this device available to Matter (untick + Add / update export to unpublish but keep its settings)</Description>
+            </Field>
 
             <Field id="exportDetailHeading" type="label" fontColor="darkgray">
                 <Label>2 · How it should appear</Label>
@@ -547,9 +551,15 @@ A Matter pairing code is not durable: once used, or once the window expires (up 
             <Field id="exportListHeading" type="label" fontColor="darkgray">
                 <Label>Currently exported</Label>
             </Field>
-            <Field id="exportList" type="list" rows="6" readonly="true">
+            <Field id="exportList" type="list" rows="6">
                 <Label></Label>
                 <List class="self" method="getCurrentExports" dynamicReload="true"/>
+                <CallbackMethod>exportListSelected</CallbackMethod>
+            </Field>
+            <Field id="exportEditSelected" type="button">
+                <Label></Label>
+                <Title>Edit selected</Title>
+                <CallbackMethod>exportListSelected</CallbackMethod>
             </Field>
         </ConfigUI>
     </MenuItem>

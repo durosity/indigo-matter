@@ -377,7 +377,7 @@ def test_the_bridge_device_dialog_is_the_whole_export_panel_plus_pairing():
     assert panel <= fields, sorted(panel - fields)
     assert "bridgeTarget" not in fields, "the device dialog IS its bridge: no popup"
     assert {"exportRvcStart", "exportRvcModeActionMop", "exportList", "bridgePair"} <= fields
-    assert dev_ui.find("Field[@id='bridgePair']/CallbackMethod").text == "bridgeDevicePair"
+    assert dev_ui.find("Field[@id='bridgePair']/CallbackMethod").text == "bridgeDeviceShowQr"
 
 
 def test_opening_a_new_bridge_devices_dialog_starts_its_bridge_and_targets_it(plug, devices):
@@ -423,6 +423,74 @@ def test_the_dialog_pairing_button_pairs_its_own_bridge(plug, devices):
     assert plug.bridgeDevicePair({"duration": "900"}, bridges.BRIDGE_DEVICE_TYPE, 500) == {"duration": "900"}
     assert seen == [plug.bridge_runtimes[500].bridge]
     _, errors = plug.bridgeDevicePair({}, bridges.BRIDGE_DEVICE_TYPE, 999)
+    assert "duration" in errors
+
+
+def _editor(plug, device_id=101, **extra):
+    values = {"exportDevice": str(device_id), "exportFilter": ""}
+    values = plug.exportDeviceChanged(values)
+    values.update(extra)
+    return values
+
+
+def test_the_published_name_defaults_to_the_indigo_name_and_stays_no_override(plug, devices):
+    values = _editor(plug)
+    assert values["exportName"] == "Study Plug" and values["exportPublish"] is True
+    values = plug.exportAddOrUpdate(values)
+    assert plug.exports.get(101) is not None and plug.exports.get(101).name_override is None
+    assert values["exportName"] == "Study Plug"
+    values = plug.exportAddOrUpdate({**_editor(plug), "exportName": "Desk Lamp"})
+    assert plug.exports.get(101).name_override == "Desk Lamp"
+
+
+def test_unticking_publish_unpublishes_but_keeps_the_settings(plug, devices):
+    plug.exportAddOrUpdate({**_editor(plug), "exportName": "Desk Lamp"})
+    values = plug.exportAddOrUpdate({**_editor(plug), "exportPublish": False})
+    assert plug.exports.get(101) is None
+    assert "not published" in dict(plug.getCurrentExports())["101"]
+    values = _editor(plug)
+    assert values["exportPublish"] is False and values["exportName"] == "Desk Lamp"
+    plug.exportAddOrUpdate({**values, "exportPublish": True})
+    assert plug.exports.get(101).name_override == "Desk Lamp"
+    assert plug._parked_entry(101) is None
+
+
+def test_remove_forgets_kept_settings(plug, devices):
+    plug.exportAddOrUpdate(_editor(plug))
+    plug.exportAddOrUpdate({**_editor(plug), "exportPublish": False})
+    plug.exportRemove({"exportDevice": "101"})
+    assert plug._parked_entry(101) is None and "101" not in dict(plug.getCurrentExports())
+
+
+def test_clicking_a_list_row_loads_it_into_the_editor(plug, devices):
+    plug.exportAddOrUpdate({**_editor(plug, 102), "exportName": "Porch"})
+    values = plug.exportListSelected({"exportList": ["102"], "exportFilter": "porch", "exportDevice": ""})
+    assert values["exportDevice"] == "102" and values["exportName"] == "Porch"
+    assert values["exportFilter"] == ""
+    assert "first" in plug.exportListSelected({"exportList": []})["exportStatus"]
+
+
+def test_kept_settings_are_per_bridge(plug, devices):
+    _start(plug, devices)
+    plug.bridgeTargetChanged({"bridgeTarget": "500"})
+    plug.exportAddOrUpdate(_editor(plug))
+    plug.exportAddOrUpdate({**_editor(plug), "exportPublish": False})
+    assert plug._parked_entry(101) is not None
+    plug.bridgeTargetChanged({"bridgeTarget": "0"})
+    assert plug._parked_entry(101) is None, "the legacy bridge has its own list"
+
+
+def test_the_qr_page_shows_the_code_and_qr(plug, devices, monkeypatch):
+    opened = []
+    monkeypatch.setattr("webbrowser.open_new", lambda url: opened.append(url))
+    _start(plug, devices)
+    plug._pairing_window_codes = lambda values, errors: ("34970112332", "MT:Y.K9042C00KA0648G00", "12:30", True)
+    plug._log_pairing_codes = Mock()
+    assert plug.bridgeDeviceShowQr({"duration": "900"}, bridges.BRIDGE_DEVICE_TYPE, 500) == {"duration": "900"}
+    page = open(opened[0][len("file://"):], encoding="utf-8").read()
+    assert "3497-011-2332" in page and "<svg" in page and "Upstairs" in page
+    plug._log_pairing_codes.assert_called_once()
+    _, errors = plug.bridgeDeviceShowQr({}, bridges.BRIDGE_DEVICE_TYPE, 999)
     assert "duration" in errors
 
 

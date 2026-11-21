@@ -18,7 +18,12 @@ explicitly instead of going through the properties.
 from __future__ import annotations
 
 import contextlib
+import html
+import io
+import os
+import tempfile
 import threading
+import webbrowser
 from typing import Any
 
 import indigo  # provided by the Indigo runtime
@@ -253,6 +258,110 @@ class BridgeDeviceMixin:
                     self.logger.exception(exc)
         self._current_bridge_id = devId or None
         return values
+
+    # pylint: disable-next=unused-argument
+    def bridgeDeviceShowQr(self, valuesDict, typeId="", devId=0):  # noqa: N802, ARG002
+        """Open a pairing window and show its QR code in a browser on the Indigo Mac.
+
+        HomeKitLink-style. Unlike a HomeKit setup code a Matter code is not
+        permanent: each click opens (or reuses) a window of up to 15 minutes,
+        and after the first ecosystem has paired each further one needs a new
+        click. The codes also go to the event log, for a remote Indigo client.
+        """
+        errors = indigo.Dict()
+        record = (getattr(self, "bridge_runtimes", None) or {}).get(devId)
+        if record is None:
+            errors["duration"] = "This bridge is not running — see the event log."
+            return (valuesDict, errors)
+        with self._targeting(record):
+            codes = self._pairing_window_codes(valuesDict, errors)
+        if codes is None:
+            return (valuesDict, errors)
+        manual, qr, expires, already_open = codes
+        self._log_pairing_codes(manual, qr, expires, already_open=already_open)  # pylint: disable=no-member
+        path = self._write_pairing_page(record.name, manual, qr, expires, already_open)
+        try:
+            webbrowser.open_new("file://" + path)
+        except Exception as exc:  # pylint: disable=broad-except
+            self.logger.warning("Matter bridge: could not open the QR page (%s) — it is at %s", exc, path)
+        return valuesDict
+
+    def _pairing_window_codes(self, valuesDict, errors):
+        """(manual, qr, expires, already_open) for the TARGET bridge, or None with errors set.
+
+        Mirrors ``menuPairMatterBridge``: reuse an open window, else open one.
+        """
+        from pairing_menu_mixin import PAIRING_READ_TIMEOUT, WINDOW_OPEN_TIMEOUT  # pylint: disable=import-outside-toplevel
+        duration = self._window_duration(valuesDict, errors)  # pylint: disable=no-member
+        if duration is None:
+            return None
+        client = self._pairing_client(errors, "duration")  # pylint: disable=no-member
+        if client is None:
+            return None
+        try:
+            pairing = self.runtime.submit(client.get_pairing()).result(timeout=PAIRING_READ_TIMEOUT)
+            if pairing.window_open and pairing.manual_pairing_code:
+                return (pairing.manual_pairing_code, pairing.qr_pairing_code,
+                        pairing.window_expires_at, not pairing.commissioned)
+            window = self.runtime.submit(
+                client.open_commissioning_window(duration)).result(timeout=WINDOW_OPEN_TIMEOUT)
+        except Exception as exc:  # pylint: disable=broad-except
+            self.logger.error("Matter bridge: opening a pairing window FAILED — %s. Existing pairings "
+                              "are untouched; if one is already open, wait for it to expire.", exc)
+            errors["duration"] = "Could not open a pairing window — see the event log."
+            return None
+        if self.export_bridge is not None:
+            self.export_bridge.note_window_opened(window.window_expires_at)
+        return (window.manual_pairing_code, window.qr_pairing_code, window.window_expires_at, False)
+
+    @staticmethod
+    def _qr_svg(payload: str) -> str:
+        """The QR as inline SVG, or "" if the renderer is not installed (codes still shown)."""
+        try:
+            import pyqrcode  # pylint: disable=import-outside-toplevel
+        except ImportError:
+            return ""
+        buffer = io.BytesIO()
+        pyqrcode.create(payload, error="M").svg(buffer, scale=8, xmldecl=False, svgns=True,
+                                                 module_color="#000", background="#fff")
+        return buffer.getvalue().decode("utf-8")
+
+    @classmethod
+    def _write_pairing_page(cls, bridge_name, manual, qr, expires, already_open) -> str:
+        """A self-contained pairing page (works offline); returns its path."""
+        digits = "".join(ch for ch in str(manual or "") if ch.isdigit())
+        shown = f"{digits[:4]}-{digits[4:7]}-{digits[7:]}" if len(digits) == 11 else str(manual or "(none)")
+        svg = cls._qr_svg(qr) if qr else ""
+        qr_block = (f'<div class="qr">{svg}</div>' if svg else
+                    '<p class="note">QR image unavailable (pyqrcode not installed) — use the setup code.</p>')
+        state = ("This bridge has not been paired yet; this is its original code."
+                 if already_open else "A new pairing window is open for one more ecosystem.")
+        page = f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pair {html.escape(str(bridge_name))}</title><style>
+:root {{ color-scheme: light dark; --bg:#f5f5f7; --card:#fff; --ink:#1d1d1f; --muted:#6e6e73; }}
+@media (prefers-color-scheme: dark) {{ :root {{ --bg:#000; --card:#1c1c1e; --ink:#f5f5f7; --muted:#98989d; }} }}
+body {{ margin:0; background:var(--bg); color:var(--ink); font:16px -apple-system, system-ui, sans-serif; }}
+.card {{ max-width:440px; margin:40px auto; background:var(--card); border-radius:18px; padding:28px; text-align:center; }}
+h1 {{ font-size:22px; margin:0 0 4px; }} .muted, .note {{ color:var(--muted); font-size:14px; }}
+.qr {{ background:#fff; display:inline-block; padding:12px; border-radius:12px; margin:18px 0; }}
+.qr svg {{ display:block; width:240px; height:240px; }}
+.code {{ font:600 30px ui-monospace, Menlo, monospace; letter-spacing:2px; margin:6px 0 2px; }}
+ol {{ text-align:left; padding-left:20px; }} li {{ margin:6px 0; }}
+</style></head><body><div class="card">
+<h1>{html.escape(str(bridge_name))}</h1><p class="muted">Matter bridge pairing</p>
+{qr_block}
+<div class="code">{html.escape(shown)}</div>
+<p class="muted">{html.escape(state)}{(" Expires " + html.escape(str(expires)) + ".") if expires else ""}</p>
+<ol><li>In Apple Home (or Alexa, Google Home, SmartThings) choose <b>Add Accessory</b>.</li>
+<li>Scan this code, or enter the setup code by hand.</li>
+<li>Accept the "uncertified accessory" warning — that is normal for a bridge like this.</li>
+<li>For another ecosystem afterwards, click <b>Show pairing QR code</b> again: each needs a new code.</li></ol>
+</div></body></html>"""
+        path = os.path.join(tempfile.gettempdir(), "matter-prototype-pairing.html")
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(page)
+        return path
 
     def _bridge_dialog_closed(self, devId) -> None:
         if getattr(self, "_current_bridge_id", None) == devId:

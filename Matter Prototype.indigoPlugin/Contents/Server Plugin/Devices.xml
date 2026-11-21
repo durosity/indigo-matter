@@ -1253,6 +1253,10 @@
                 <CallbackMethod>exportDeviceChanged</CallbackMethod>
                 <Description>A ● marks a device that is already exported.</Description>
             </Field>
+            <Field id="exportPublish" type="checkbox" defaultValue="true">
+                <Label>Publish device:</Label>
+                <Description>Make this device available to Matter (untick + Add / update export to unpublish but keep its settings)</Description>
+            </Field>
 
             <Field id="exportDetailHeading" type="label" fontColor="darkgray">
                 <Label>2 · How it should appear</Label>
@@ -1483,21 +1487,27 @@
             <Field id="exportListHeading" type="label" fontColor="darkgray">
                 <Label>Currently exported</Label>
             </Field>
-            <Field id="exportList" type="list" rows="6" readonly="true">
+            <Field id="exportList" type="list" rows="6">
                 <Label></Label>
                 <List class="self" method="getCurrentExports" dynamicReload="true"/>
+                <CallbackMethod>exportListSelected</CallbackMethod>
+            </Field>
+            <Field id="exportEditSelected" type="button">
+                <Label></Label>
+                <Title>Edit selected</Title>
+                <CallbackMethod>exportListSelected</CallbackMethod>
             </Field>
             <Field id="bridgePairSeparator" type="separator"/>
             <Field id="bridgePairHelp" type="label">
-                <Label>Pairing: opens a pairing window for THIS bridge. The code and a link to a QR page are written to the Indigo event log. Once the first ecosystem has paired, each further one needs a new window. The bridge only runs while it exports at least one device.</Label>
+                <Label>Pairing: opens a pairing window for THIS bridge and shows its QR code and setup code in a browser on the Indigo Mac (they are also written to the event log). Once the first ecosystem has paired, each further one needs a new window. The bridge only runs while it exports at least one device.</Label>
             </Field>
             <Field id="duration" type="textfield" defaultValue="900">
                 <Label>Window stays open for (seconds, 180 to 900):</Label>
             </Field>
             <Field id="bridgePair" type="button">
                 <Label></Label>
-                <Title>Open pairing window</Title>
-                <CallbackMethod>bridgeDevicePair</CallbackMethod>
+                <Title>Show pairing QR code</Title>
+                <CallbackMethod>bridgeDeviceShowQr</CallbackMethod>
             </Field>
         </ConfigUI>
         <States>

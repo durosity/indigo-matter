@@ -152,6 +152,14 @@ Done (each commit tested in full before landing; suite about 4650 passing):
   `churnDetail`, `fabric1..5Name/Health`, copied from its XML), and each bridge
   device's health reporter writes them to the bridge device itself. The
   standing `matterBridgeHealth` device stays the legacy bridge's.
+- step 3a — HomeKitLink-style editing (`step3a.py`): the published name defaults
+  to the Indigo name (left at it = no override, so renames follow); clicking a
+  row in "Currently exported" (or "Edit selected") loads it into the editor;
+  a "Publish device" checkbox — unticked + Add/update unpublishes but KEEPS the
+  settings (`exportParked`, per bridge), Remove forgets them; "Show pairing QR
+  code" opens a window and a self-contained QR page (pyqrcode, SVG) in a browser
+  on the Indigo Mac, codes also logged. Step 3b next: state picker with Auto for
+  every device, any device as any type, action groups for commands.
 - Known gaps, by design for now: device bridges ignore the global "Enable Matter export" switch (absent `exportEnabled` reads
   as on); fabric backup/restore and CT calibration act on the legacy bridge
   only; no "on bridge X" exclusion yet, so one device CAN be on two bridges

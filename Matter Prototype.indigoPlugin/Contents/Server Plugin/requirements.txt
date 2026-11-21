@@ -9,3 +9,4 @@
 # Python whose architecture matches the Indigo server:
 #   /Library/Frameworks/Python.framework/Versions/Current/bin/python3 -m pip install 'websockets>=12,<16'
 websockets>=12,<16
+pyqrcode==1.2.1

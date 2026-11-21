@@ -735,7 +735,7 @@ def test_device_changed_loads_the_saved_entry(plug):
 def test_device_changed_seeds_the_safe_default_for_a_new_export(plug):
     values = plug.exportDeviceChanged(_values(exportDevice="101"), "manageMatterExports")
     assert values["exportRole"] == "onOffPlugInUnit"
-    assert values["exportName"] == ""
+    assert values["exportName"] == "Study Plug"  # fork step 3a: defaults to the Indigo name
     assert values["exportInvert"] is False
     assert "not exported yet" in values["exportStatus"]
 

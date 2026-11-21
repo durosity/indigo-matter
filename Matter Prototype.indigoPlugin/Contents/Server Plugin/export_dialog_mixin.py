@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+import json
 import indigo  # provided by the Indigo runtime
 
 import export_catalog
@@ -478,6 +479,13 @@ class ExportDialogMixin:
                 failures += 1
                 options.append((f"{EXCLUDED_OPTION_PREFIX}err{len(options)}",
                                 f"— {ROW_ERROR_LABEL}"))
+        for device_id, entry in sorted(self._parked_entries().items()):
+            if self.exports.get(device_id) is not None:
+                continue
+            dev = self._indigo_device(device_id)
+            name = str(getattr(dev, "name", "") or "") if dev is not None else f"(deleted device {device_id})"
+            options.append((str(device_id),
+                            f"{name} → {export_catalog.role_label(entry.role)} · not published"))
         return options or [(NO_SELECTION_ID, "(nothing exported yet)")]
 
     @classmethod
@@ -961,6 +969,10 @@ class ExportDialogMixin:
                                       f"{self._exported_warning(device_id)}")
             return values
         entry = self.exports.get(device_id) if self.exports is not None else None
+        parked = None
+        if entry is None:
+            # Unpublished but kept (step 3a): load its saved settings, Publish unticked.
+            entry = parked = self._parked_entry(device_id)
         saved = dict(entry.options) if entry is not None else {}
         verdict = export_catalog.classify(dev, self._export_plugin_id(), saved)
         if isinstance(verdict, export_catalog.Excluded):
@@ -980,6 +992,8 @@ class ExportDialogMixin:
             values["exportNeedsMapping"] = "true"
             state_key = self._fleet_state_key(dev) or verdict.suggested_state_key
             values["exportStateKey"] = state_key
+            values["exportName"] = str(dev.name)
+            values["exportPublish"] = True
             values["exportStateInvert"] = False
             # Seed the role too. `exportStateKeyChanged` does this — but only
             # when the user CHANGES the state menu, and the line above has
@@ -1004,15 +1018,21 @@ class ExportDialogMixin:
         values["exportStateInvert"] = bool(saved.get(OPTION_STATE_INVERT, False))
         if entry is not None:
             values["exportRole"] = entry.role
-            values["exportName"] = entry.name_override or ""
+            values["exportName"] = entry.name_override or str(dev.name)
             values["exportInvert"] = bool(entry.options.get(OPTION_INVERT, False))
             self._apply_ct_bounds_fields(values, entry.options)
             self._apply_rvc_fields(values, entry.options)
-            values["exportStatus"] = f"{dev.name} is exported as {export_catalog.role_label(entry.role)}."
+            values["exportPublish"] = parked is None
+            values["exportStatus"] = (
+                f"{dev.name} is exported as {export_catalog.role_label(entry.role)}." if parked is None
+                else f"{dev.name} is not published (its settings as a "
+                     f"{export_catalog.role_label(entry.role).lower()} are kept). Tick Publish device "
+                     "and click Add / update export to publish it.")
         else:
             values["exportRole"] = verdict.default_role
             values["exportStateInvert"] = export_catalog.default_invert_for(verdict.default_role)
-            values["exportName"] = ""
+            values["exportName"] = str(dev.name)
+            values["exportPublish"] = True
             values["exportInvert"] = False
             self._apply_ct_bounds_fields(values, None)
             self._apply_rvc_fields(values, None)
@@ -1242,7 +1262,107 @@ class ExportDialogMixin:
                     "seed and was dropped; the learner will re-confirm it from the device.")
         return ct_coherence_note
 
+    # ------------------------------------------------------------------
+    # Step 3a (private fork): Publish checkbox, kept settings, list editing
+    # ------------------------------------------------------------------
+    #: Where unpublished-but-kept exports live, per bridge (JSON: id → entry).
+    PARKED_PREF = "exportParked"
+
+    def _parking_prefs(self):
+        finder = getattr(self, "_target_runtime", None)
+        record = finder() if callable(finder) else None  # pylint: disable=not-callable
+        prefs = getattr(record, "prefs", None)
+        return prefs if prefs is not None else self.pluginPrefs
+
+    def _parked_entries(self) -> dict:
+        try:
+            raw = json.loads(self._parking_prefs().get(self.PARKED_PREF, "") or "{}")
+        except (TypeError, ValueError):
+            return {}
+        parked = {}
+        for key, value in (raw.items() if isinstance(raw, dict) else ()):
+            try:
+                parked[int(key)] = ExportEntry.from_dict(value)
+            except (TypeError, ValueError):
+                continue
+        return parked
+
+    def _parked_entry(self, device_id: int):
+        return self._parked_entries().get(device_id)
+
+    def _write_parked(self, parked: dict) -> None:
+        self._parking_prefs()[self.PARKED_PREF] = json.dumps(
+            {str(k): v.to_dict() for k, v in sorted(parked.items())})
+        self._save_plugin_prefs()
+
+    def _park(self, entry) -> None:
+        parked = self._parked_entries()
+        parked[entry.indigo_device_id] = entry
+        self._write_parked(parked)
+
+    def _unpark(self, device_id: int) -> bool:
+        parked = self._parked_entries()
+        if parked.pop(device_id, None) is None:
+            return False
+        self._write_parked(parked)
+        return True
+
+    def exportListSelected(self, valuesDict, typeId="", devId=0):
+        """A row in "Currently exported" was clicked (or "Edit selected"): edit it."""
+        raw = valuesDict.get("exportList")
+        picked = [raw] if isinstance(raw, (str, int)) else list(raw or [])
+        ids = [str(item) for item in picked if str(item).isdigit()]
+        if not ids:
+            valuesDict["exportStatus"] = "Select a device in the list first."
+            return valuesDict
+        valuesDict["exportFilter"] = ""
+        valuesDict["exportDevice"] = ids[0]
+        return self.exportDeviceChanged(valuesDict, typeId, devId)
+
     def exportAddOrUpdate(self, valuesDict, typeId="", devId=0):
+        """Save the editor: publish it, or — Publish unticked — unpublish but keep it."""
+        values = valuesDict
+        kind, device_id = self._export_selection(values)
+        dev = self._indigo_device(device_id) if kind == "device" else None
+        indigo_name = str(getattr(dev, "name", "") or "") if dev is not None else ""
+        if kind == "device" and not self._truthy(values.get("exportPublish", True)):
+            return self._unpublish_export(values, device_id, indigo_name)
+        if indigo_name and str(values.get("exportName", "") or "").strip() == indigo_name:
+            values["exportName"] = ""  # the Indigo name: no override, so renames follow
+        values = self._export_add_or_update(values, typeId, devId)
+        if indigo_name and not str(values.get("exportName", "") or "").strip():
+            values["exportName"] = indigo_name
+        if kind == "device" and self.exports is not None and self.exports.get(device_id) is not None:
+            self._unpark(device_id)
+            values["exportPublish"] = True
+        return values
+
+    def _unpublish_export(self, values, device_id: int, name: str):
+        entry = self.exports.get(device_id) if self.exports is not None else None
+        if entry is None:
+            values["exportStatus"] = ("Not published. Tick Publish device and click "
+                                      "Add / update export to publish it.")
+            return values
+        self._park(entry)
+        values = self._export_remove(values)
+        values = self.exportDeviceChanged(values)
+        values["exportStatus"] = (f"{name or 'The device'} is no longer published; its settings are "
+                                  "kept. Tick Publish device to publish it again.")
+        return values
+
+    def exportRemove(self, valuesDict, typeId="", devId=0):
+        """Remove: unpublish AND forget its settings (unlike unticking Publish)."""
+        kind, device_id = self._export_selection(valuesDict)
+        exported = self.exports is not None and self.exports.get(device_id) is not None
+        if kind == "device" and not exported and self._unpark(device_id):
+            valuesDict["exportStatus"] = "Forgot the saved settings for that device."
+            return valuesDict
+        values = self._export_remove(valuesDict, typeId, devId)
+        if kind == "device":
+            self._unpark(device_id)
+        return values
+
+    def _export_add_or_update(self, valuesDict, typeId="", devId=0):
         # pylint: disable=unused-argument
         """Add or update one export. Validates the role against the catalog.
 
@@ -1422,7 +1542,7 @@ class ExportDialogMixin:
             return False
         return True
 
-    def exportRemove(self, valuesDict, typeId="", devId=0):
+    def _export_remove(self, valuesDict, typeId="", devId=0):
         # pylint: disable=unused-argument
         """Drop the picked device from the allow-list. Returns values only (see above)."""
         values = valuesDict

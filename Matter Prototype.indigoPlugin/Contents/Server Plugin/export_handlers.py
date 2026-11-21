@@ -1880,6 +1880,140 @@ HANDLERS: dict[str, ExportHandler] = {
 BRIDGEABLE_ROLES = frozenset(HANDLERS)
 
 
+_TRUE_WORDS = frozenset(("on", "true", "yes", "open", "opened", "active", "detected", "locked",
+                         "occupied", "wet", "1", "tripped", "alarm"))
+_FALSE_WORDS = frozenset(("off", "false", "no", "closed", "inactive", "clear", "unlocked",
+                          "unoccupied", "dry", "0", "", "none", "normal", "ok"))
+
+
+def _mapped_raw(dev: Any, options: dict, numeric: bool) -> Any:
+    """The mapped export's source value: the chosen state, or Auto's pick."""
+    key = options.get(export_catalog.OPTION_STATE_KEY)
+    states = {}
+    try:
+        states = dict(getattr(dev, "states", None) or {})
+    except Exception:  # pylint: disable=broad-except
+        pass
+    if isinstance(key, str) and key:
+        return states.get(key)
+    if numeric:
+        for name in ("sensorValue", "brightness"):
+            value = getattr(dev, name, None)
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                return value
+        return next((v for v in states.values()
+                     if isinstance(v, (int, float)) and not isinstance(v, bool)), None)
+    value = getattr(dev, "onState", None)
+    if isinstance(value, bool):
+        return value
+    return next((v for v in states.values() if isinstance(v, bool)), None)
+
+
+def mapped_bool(dev: Any, options: Optional[dict]) -> Optional[bool]:
+    """The source as on/off (inverted if ticked), or None if it cannot be read as one."""
+    options = options or {}
+    raw = _mapped_raw(dev, options, numeric=False)
+    if isinstance(raw, bool):
+        value = raw
+    elif isinstance(raw, (int, float)):
+        value = raw != 0
+    elif isinstance(raw, str) and raw.strip().lower() in _TRUE_WORDS | _FALSE_WORDS:
+        value = raw.strip().lower() in _TRUE_WORDS
+    else:
+        return None
+    return (not value) if options.get(export_catalog.OPTION_STATE_INVERT) is True else value
+
+
+def mapped_number(dev: Any, options: Optional[dict]) -> Optional[float]:
+    """The source as a number, or None."""
+    raw = _mapped_raw(dev, options or {}, numeric=True)
+    if isinstance(raw, bool):
+        return 1.0 if raw else 0.0
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+class _MappedExport:
+    """Mixed in FRONT of a role's own handler for a ``crossMapped`` export.
+
+    Everything else (diffs, battery, the node-facing shape) is the role's own;
+    only where the value comes from and where commands go change.
+    """
+
+    def states_for(self, dev: Any, options: Optional[dict] = None) -> dict:
+        role = self.role
+        if role in export_catalog.NUMERIC_SENSOR_ROLES:
+            number = mapped_number(dev, options)
+            return {} if number is None else {self.state_key: number}
+        value = mapped_bool(dev, options)
+        if value is None:
+            return {}
+        if role in export_catalog.BINARY_SENSOR_ROLES:
+            return {self.state_key: value}
+        if role == export_catalog.ROLE_DOOR_LOCK:
+            return {STATE_LOCKED: value}
+        if role == export_catalog.ROLE_WINDOW_COVERING:
+            return {STATE_POSITION: 100 if value else 0}
+        return {STATE_ON_OFF: value}
+
+    def commands(self) -> dict[str, Callable[[dict, Any, dict], Optional[str]]]:
+        native = super().commands()  # type: ignore[misc]
+        return {command: (lambda args, dev, options, command=command:
+                          self._mapped_command(command, native, args, dev, options))
+                for command in native}
+
+    @staticmethod
+    def _sense(command: str, args: dict) -> Optional[bool]:
+        if command == COMMAND_ON_OFF:
+            return bool(args.get("value"))
+        if command in (COMMAND_LOCK, COMMAND_UNLOCK):
+            return command == COMMAND_LOCK
+        if command == COMMAND_SET_LEVEL:
+            return (args.get(STATE_LEVEL) or 0) > 0
+        if command == COMMAND_GO_TO_POSITION:
+            return (args.get(STATE_POSITION) or 0) >= 50
+        return None
+
+    def _mapped_command(self, command, native, args, dev, options) -> Optional[str]:
+        sense = self._sense(command, args)
+        if sense is not None:
+            group = options.get(export_catalog.OPTION_CMD_ON_AG if sense else export_catalog.OPTION_CMD_OFF_AG)
+            if group:
+                indigo.actionGroup.execute(int(group))
+                return None
+        if export_catalog.device_kind(dev) not in (export_catalog.KIND_RELAY, export_catalog.KIND_DIMMER):
+            return ("this device cannot do that itself and no action group is chosen for it — "
+                    "choose one in its export settings")
+        inverted = options.get(export_catalog.OPTION_STATE_INVERT) is True
+        if inverted and command == COMMAND_ON_OFF:
+            args = {**args, "value": not bool(args.get("value"))}
+        elif inverted and command in (COMMAND_LOCK, COMMAND_UNLOCK):
+            command = COMMAND_UNLOCK if command == COMMAND_LOCK else COMMAND_LOCK
+        if export_catalog.device_kind(dev) == export_catalog.KIND_RELAY and command == COMMAND_GO_TO_POSITION:
+            (indigo.device.turnOn if sense else indigo.device.turnOff)(dev)
+            return None
+        return native[command](args, dev, options)
+
+
+_MAPPED_HANDLERS: dict[str, ExportHandler] = {}
+
+
+def handler_for_entry(entry: Any) -> Optional[ExportHandler]:
+    """The handler for one export entry: the role's own, or its mapped variant."""
+    base = HANDLERS.get(entry.role)
+    options = getattr(entry, "options", None) or {}
+    if base is None or options.get(export_catalog.OPTION_CROSS) is not True \
+            or entry.role not in export_catalog.CROSS_MAPPABLE_ROLES:
+        return base
+    mapped = _MAPPED_HANDLERS.get(entry.role)
+    if mapped is None:
+        cls = type(f"Mapped{type(base).__name__}", (_MappedExport, type(base)), {})
+        mapped = _MAPPED_HANDLERS[entry.role] = cls()
+    return mapped
+
+
 def handler_for(role: str) -> Optional[ExportHandler]:
     """The handler for ``role``, or ``None`` if this version cannot bridge it.
 

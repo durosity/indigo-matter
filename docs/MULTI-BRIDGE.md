@@ -160,6 +160,16 @@ Done (each commit tested in full before landing; suite about 4650 passing):
   code" opens a window and a self-contained QR page (pyqrcode, SVG) in a browser
   on the Indigo Mac, codes also logged. Step 3b next: state picker with Auto for
   every device, any device as any type, action groups for commands.
+- step 3b — any device as any single-value type (`step3b.py`): the state
+  picker shows for every device with "Auto (…)" first; the role menu lists the
+  device's own types, then every other single-value type "(mapped)". A mapped
+  entry carries `crossMapped` (+ optional `stateKey`, `stateInvert`,
+  `cmdOnActionGroup`/`cmdOffActionGroup`); `export_handlers.handler_for_entry`
+  wraps the role's own handler so the value comes from the state (bools,
+  numbers and words like open/closed) and commands go to the action groups,
+  else the device's own on/off (relays and dimmers only), inverted if ticked.
+  Not mappable: colour lights, thermostat, vacuum. Changing an exported
+  device's type creates a new accessory in each ecosystem.
 - Known gaps, by design for now: device bridges ignore the global "Enable Matter export" switch (absent `exportEnabled` reads
   as on); fabric backup/restore and CT calibration act on the legacy bridge
   only; no "on bridge X" exclusion yet, so one device CAN be on two bridges

@@ -1267,9 +1267,8 @@
                  field value and "is this device mappable" is not one. -->
             <Field id="exportNeedsMapping" type="textfield" hidden="true" defaultValue="false"/>
             <Field id="exportStateKey" type="menu"
-                   visibleBindingId="exportNeedsMapping" visibleBindingValue="true"
                    alwaysUseInDialogHeightCalc="true">
-                <Label>Which state is the reading:</Label>
+                <Label>Device state:</Label>
                 <List class="self" method="getExportStateKeys" dynamicReload="true"/>
                 <CallbackMethod>exportStateKeyChanged</CallbackMethod>
                 <Description>This device's plugin keeps its reading in a state of its own rather than in Indigo's on/off flag, so tell the bridge which one it is.</Description>
@@ -1292,10 +1291,25 @@
             </Field>
             <Field id="exportStateInvert" type="checkbox" defaultValue="false"
                    visibleBindingId="exportRole"
-                   visibleBindingValue="occupancySensor,contactSensor,waterLeakDetector,waterFreezeDetector,rainSensor,smokeAlarm,coAlarm"
+                   visibleBindingValue="onOffPlugInUnit,onOffLight,dimmableLight,doorLock,occupancySensor,contactSensor,waterLeakDetector,waterFreezeDetector,rainSensor,smokeAlarm,coAlarm"
                    alwaysUseInDialogHeightCalc="true">
                 <Label>Reading is inverted:</Label>
                 <Description>Tick if the device reports on/true for the OPPOSITE of what this role publishes. Contact sensors start ticked: Indigo reports a door as on when it is OPEN, while Matter reads it as closed.</Description>
+            </Field>
+            <Field id="exportCmdOn" type="menu"
+                   visibleBindingId="exportRole"
+                   visibleBindingValue="onOffPlugInUnit,onOffLight,dimmableLight,doorLock,windowCovering"
+                   alwaysUseInDialogHeightCalc="true">
+                <Label>ON / LOCK / OPEN runs:</Label>
+                <List class="self" method="getExportActionGroups" dynamicReload="true"/>
+                <Description>Optional: an action group to run instead of the device's own command (needed when the device cannot do it itself, e.g. a sensor shown as a lock)</Description>
+            </Field>
+            <Field id="exportCmdOff" type="menu"
+                   visibleBindingId="exportRole"
+                   visibleBindingValue="onOffPlugInUnit,onOffLight,dimmableLight,doorLock,windowCovering"
+                   alwaysUseInDialogHeightCalc="true">
+                <Label>OFF / UNLOCK / CLOSE runs:</Label>
+                <List class="self" method="getExportActionGroups" dynamicReload="true"/>
             </Field>
             <!-- Physical colour-temperature bounds (issue #293). Visible for
                  both CT roles, matching the exportStateInvert precedent

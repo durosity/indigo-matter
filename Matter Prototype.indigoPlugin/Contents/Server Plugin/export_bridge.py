@@ -1136,7 +1136,7 @@ class ExportBridge:
         if entry.role not in verdict.eligible_roles:
             return self._skip(device_id, f"it no longer offers the role {entry.role!r} "
                                          f"(now: {', '.join(verdict.eligible_roles)})")
-        handler = export_handlers.handler_for(entry.role)
+        handler = export_handlers.handler_for_entry(entry)
         if handler is None:
             return self._skip(device_id, f"the role {entry.role!r} is not one this plugin "
                                          "version can bridge")
@@ -1259,7 +1259,7 @@ class ExportBridge:
         entry = self._store.get(new_dev.id)
         if entry is None:                      # removed between the check and here
             return
-        handler = export_handlers.handler_for(entry.role)
+        handler = export_handlers.handler_for_entry(entry)
         if handler is None:
             return                             # already warned by the provider
         client = self._live_client("the state update", new_dev.id)
@@ -1588,7 +1588,7 @@ class ExportBridge:
                 "exported — ignoring. The accessory should disappear at the next reconnect.",
                 command.command, device_id)
             return
-        handler = export_handlers.handler_for(entry.role)
+        handler = export_handlers.handler_for_entry(entry)
         if handler is None:
             self._logger.warning(
                 "Matter bridge: %r arrived for device %s exported as %s, a role this version "

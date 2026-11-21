@@ -502,6 +502,27 @@ def device_kind(dev) -> str:
     return ""
 
 
+#: Step 3b (private fork): "mapped" exports — any device as any SINGLE-VALUE
+#: type. The value comes from a chosen (or automatic) state; commands go to the
+#: device's own on/off where it has one, else to action groups. Colour lights,
+#: the thermostat and the vacuum need the device's real capabilities and are
+#: not offered as mappings.
+OPTION_CROSS = "crossMapped"
+OPTION_CMD_ON_AG = "cmdOnActionGroup"
+OPTION_CMD_OFF_AG = "cmdOffActionGroup"
+CROSS_CONTROLLABLE_ROLES = (ROLE_ON_OFF_PLUG, ROLE_ON_OFF_LIGHT, ROLE_DIMMABLE_LIGHT,
+                            ROLE_DOOR_LOCK, ROLE_WINDOW_COVERING)
+CROSS_MAPPABLE_ROLES = (*CROSS_CONTROLLABLE_ROLES, *BINARY_SENSOR_ROLES, *NUMERIC_SENSOR_ROLES)
+
+
+def _cross(dev, options) -> Verdict:
+    """A mapped export: eligible for every single-value role while its state exists."""
+    key = _mapped_state_key(options)
+    if key is not None and key not in dict(getattr(dev, "states", None) or {}):
+        return Excluded(REASON_MAPPED_STATE_GONE)
+    return EligibleDevice(eligible_roles=CROSS_MAPPABLE_ROLES, default_role=CROSS_MAPPABLE_ROLES[0])
+
+
 def classify(dev, plugin_id: str = DEFAULT_PLUGIN_ID, options: Optional[dict] = None) -> Verdict:
     """Classify one Indigo device for export (§5.2).
 
@@ -528,6 +549,8 @@ def classify(dev, plugin_id: str = DEFAULT_PLUGIN_ID, options: Optional[dict] = 
     try:
         if _plugin_id_of(dev) == plugin_id or _plugin_id_of(dev) in FOREIGN_MATTER_PLUGIN_IDS:  # fork
             return Excluded(REASON_LOOP_GUARD)
+        if isinstance(options, dict) and options.get(OPTION_CROSS) is True:
+            return _cross(dev, options)
         handler = _BY_KIND.get(device_kind(dev))
         verdict = _custom(dev, options) if handler is None else handler(dev, options)
         return _with_vacuum(verdict, dev, options)

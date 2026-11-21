@@ -441,9 +441,16 @@ class ExportDialogMixin:
         # The mapping being composed in the dialog is part of the
         # question (ADR-0012): a custom device offers no roles until its
         # state is chosen, and offers all the binary ones the moment it is.
-        verdict = export_catalog.classify(dev, self._export_plugin_id(),
-                                          self._mapping_from_values(valuesDict or {}))
+        mapping = self._mapping_from_values(valuesDict or {})
+        verdict = export_catalog.classify(dev, self._export_plugin_id(), mapping)
         if not isinstance(verdict, export_catalog.EligibleDevice):
+            # A chosen state no native role reads (a number on a custom device):
+            # the mapped types can still use it.
+            if mapping and isinstance(export_catalog.classify(
+                    dev, self._export_plugin_id(), {**mapping, export_catalog.OPTION_CROSS: True}),
+                    export_catalog.EligibleDevice):
+                return [(role, f"{export_catalog.role_label(role)} (mapped)")
+                        for role in export_catalog.CROSS_MAPPABLE_ROLES]
             return []
         options = []
         for role in verdict.eligible_roles:
@@ -451,6 +458,9 @@ class ExportDialogMixin:
                 options.append((role, export_catalog.role_label(role)))
             except Exception as exc:  # pylint: disable=broad-except
                 self._log_row_failure(exc, first=not options)
+        native = set(verdict.eligible_roles)
+        options.extend((role, f"{export_catalog.role_label(role)} (mapped)")
+                       for role in export_catalog.CROSS_MAPPABLE_ROLES if role not in native)
         return options
 
     @degrades_to_list_error
@@ -697,7 +707,18 @@ class ExportDialogMixin:
         dev = self._indigo_device(device_id)
         if dev is None:
             return []
-        return [(key, key) for key in export_catalog.binary_state_keys(dev)]
+        binary = list(export_catalog.binary_state_keys(dev))
+        try:
+            others = sorted(k for k in dict(getattr(dev, "states", None) or {}) if k not in binary)
+        except Exception:  # pylint: disable=broad-except
+            others = []
+        if getattr(dev, "onState", None) is not None:
+            auto = "Auto (on/off state)"
+        elif getattr(dev, "sensorValue", None) is not None:
+            auto = "Auto (sensor value)"
+        else:
+            auto = "Auto"
+        return [("", auto)] + [(key, key) for key in binary] + [(key, key) for key in others]
 
     # ------------------------------------------------------------------
     # Robot vacuum fields (ADR-0019)
@@ -1016,6 +1037,8 @@ class ExportDialogMixin:
         values["exportNeedsMapping"] = "true" if saved.get(OPTION_STATE_KEY) else "false"
         values["exportStateKey"] = str(saved.get(OPTION_STATE_KEY, "") or "")
         values["exportStateInvert"] = bool(saved.get(OPTION_STATE_INVERT, False))
+        values["exportCmdOn"] = str(saved.get(export_catalog.OPTION_CMD_ON_AG, "") or self.RVC_AUTOMATIC)
+        values["exportCmdOff"] = str(saved.get(export_catalog.OPTION_CMD_OFF_AG, "") or self.RVC_AUTOMATIC)
         if entry is not None:
             values["exportRole"] = entry.role
             values["exportName"] = entry.name_override or str(dev.name)
@@ -1307,6 +1330,48 @@ class ExportDialogMixin:
         self._write_parked(parked)
         return True
 
+    def _cross_options(self, values: dict, dev, mapping: dict) -> dict:
+        """The mapped-export options the form asks for, or {} for a plain export.
+
+        Mapped when the chosen role is not one of the device's own, or when a
+        non-sensor role is given a state, an inversion or an action group.
+        """
+        role = str(values.get("exportRole", "") or "")
+        if role not in export_catalog.CROSS_MAPPABLE_ROLES:
+            return {}
+        try:
+            states = dict(getattr(dev, "states", None) or {})
+        except Exception:  # pylint: disable=broad-except
+            states = {}
+        key = str(values.get("exportStateKey", "") or "").strip()
+        if key and key not in states:
+            key = ""  # a stale pick from another device: Auto
+        native = export_catalog.classify(dev, self._export_plugin_id(), mapping)
+        if isinstance(native, export_catalog.MappableDevice) and not key:
+            return {}  # a custom device still has to say which state is the reading
+        if isinstance(native, export_catalog.Excluded) and not (
+                key and native.reason == export_catalog.REASON_MAPPED_STATE_GONE):
+            return {}  # excluded devices stay excluded (fans, irrigation, the loop guard …)
+        native_roles = native.eligible_roles if isinstance(native, export_catalog.EligibleDevice) else ()
+        groups = {}
+        if role in export_catalog.CROSS_CONTROLLABLE_ROLES:
+            for field, option in (("exportCmdOn", export_catalog.OPTION_CMD_ON_AG),
+                                  ("exportCmdOff", export_catalog.OPTION_CMD_OFF_AG)):
+                raw = str(values.get(field, "") or "")
+                if raw.isdigit() and raw != self.RVC_AUTOMATIC:
+                    groups[option] = int(raw)
+        invert = self._truthy(values.get("exportStateInvert"))
+        mapped = role not in native_roles or (
+            role not in MAPPABLE_ROLES and (key or invert or groups))
+        if not mapped:
+            return {}
+        options = {export_catalog.OPTION_CROSS: True, **groups}
+        if key:
+            options[OPTION_STATE_KEY] = key
+        if invert:
+            options[OPTION_STATE_INVERT] = True
+        return options
+
     def exportListSelected(self, valuesDict, typeId="", devId=0):
         """A row in "Currently exported" was clicked (or "Edit selected"): edit it."""
         raw = valuesDict.get("exportList")
@@ -1396,7 +1461,9 @@ class ExportDialogMixin:
         # because the user has now answered which state is its reading.
         mapping = self._mapping_from_values(values)
         rvc_options = self._rvc_options_from_values(values)
-        verdict = export_catalog.classify(dev, self._export_plugin_id(), {**mapping, **rvc_options})
+        cross = self._cross_options(values, dev, mapping)
+        verdict = export_catalog.classify(dev, self._export_plugin_id(),
+                                          {**mapping, **rvc_options, **cross})
         if kind == "excluded" or isinstance(verdict, export_catalog.Excluded):
             reason = verdict.reason if isinstance(verdict, export_catalog.Excluded) \
                 else "not exportable"
@@ -1426,6 +1493,7 @@ class ExportDialogMixin:
         # STANDARD sensor whose dialog still carries a key from a previous
         # selection.
         options = dict(mapping) if role in MAPPABLE_ROLES else {}
+        options.update(cross)
         if role == export_catalog.ROLE_WINDOW_COVERING and self._truthy(values.get("exportInvert")):
             options[OPTION_INVERT] = True
         if role == export_catalog.ROLE_ROBOTIC_VACUUM:

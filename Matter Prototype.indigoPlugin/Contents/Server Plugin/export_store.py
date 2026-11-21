@@ -146,7 +146,7 @@ def _validate_options(options: dict, role: str, device_id: int) -> None:
             raise ValueError(
                 f"export entry {OPTION_STATE_KEY!r} option is not a non-empty string "
                 f"(device {device_id})")
-        if role not in MAPPABLE_ROLES:
+        if role not in MAPPABLE_ROLES and options.get(export_catalog.OPTION_CROSS) is not True:
             raise ValueError(
                 f"export entry has the {OPTION_STATE_KEY!r} option on role {role!r}, which "
                 f"reads no boolean state (device {device_id})")
@@ -155,7 +155,7 @@ def _validate_options(options: dict, role: str, device_id: int) -> None:
             raise ValueError(
                 f"export entry {OPTION_STATE_INVERT!r} option is not a boolean "
                 f"(device {device_id})")
-        if role not in MAPPABLE_ROLES:
+        if role not in MAPPABLE_ROLES and options.get(export_catalog.OPTION_CROSS) is not True:
             # Polarity belongs to the binary sensors and nothing else. It used
             # to require a state key as well — "an inversion with nothing to
             # invert" — which was wrong: a device with a perfectly good
@@ -165,8 +165,30 @@ def _validate_options(options: dict, role: str, device_id: int) -> None:
             raise ValueError(
                 f"export entry has the {OPTION_STATE_INVERT!r} option on role {role!r}, "
                 f"which reads no boolean state (device {device_id})")
+    _validate_cross(options, role, device_id)
     _validate_ct_bounds(options, role, device_id)
     _validate_rvc(options, role, device_id)
+
+
+def _validate_cross(options: dict, role: str, device_id: int) -> None:
+    """Step 3b's mapped-export keys, per key and per role like the rest."""
+    cross = options.get(export_catalog.OPTION_CROSS)
+    if export_catalog.OPTION_CROSS in options:
+        if cross is not True:
+            raise ValueError(f"export entry {export_catalog.OPTION_CROSS!r} option is not True "
+                             f"(device {device_id})")
+        if role not in export_catalog.CROSS_MAPPABLE_ROLES:
+            raise ValueError(f"export entry maps onto role {role!r}, which cannot be mapped "
+                             f"(device {device_id})")
+    for key in (export_catalog.OPTION_CMD_ON_AG, export_catalog.OPTION_CMD_OFF_AG):
+        if key not in options:
+            continue
+        value = options[key]
+        if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+            raise ValueError(f"export entry {key!r} option is not an action group id (device {device_id})")
+        if cross is not True or role not in export_catalog.CROSS_CONTROLLABLE_ROLES:
+            raise ValueError(f"export entry has the {key!r} option on role {role!r}, which is not a "
+                             f"mapped controllable export (device {device_id})")
 
 
 def _validate_rvc(options: dict, role: str, device_id: int) -> None:

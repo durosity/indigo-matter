@@ -594,7 +594,8 @@ def test_picker_tolerates_a_missing_values_dict(plug):
 # ---------------------------------------------------------------------------
 def test_role_picker_offers_the_catalog_roles_with_the_default_first(plug):
     options = plug.getExportRoles(valuesDict=_values(exportDevice="101"))
-    assert [key for key, _ in options] == ["onOffPlugInUnit", "onOffLight", "doorLock"]
+    # fork step 3b: the device's own types first, then the "(mapped)" ones
+    assert [key for key, _ in options][:3] == ["onOffPlugInUnit", "onOffLight", "doorLock"]
     assert options[0][1] == export_catalog.role_label("onOffPlugInUnit")
 
 
@@ -2548,7 +2549,9 @@ def test_no_roles_are_offered_until_a_state_is_chosen(plug, devices):
     _zone(plug, devices)
     assert plug.getExportRoles(valuesDict=_values(exportDevice="201")) == []
     offered = plug.getExportRoles(valuesDict=_values(exportDevice="201", exportStateKey="status"))
-    assert [role for role, _label in offered] == list(export_catalog.BINARY_SENSOR_ROLES)
+    # fork step 3b: the binary roles first, then the "(mapped)" ones
+    binary = list(export_catalog.BINARY_SENSOR_ROLES)
+    assert [role for role, _label in offered][:len(binary)] == binary
 
 
 def test_choosing_a_state_seeds_the_default_role(plug, devices):

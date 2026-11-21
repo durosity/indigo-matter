@@ -20,7 +20,9 @@ from __future__ import annotations
 import contextlib
 import html
 import io
+import json
 import os
+import shutil
 import tempfile
 import threading
 import webbrowser
@@ -32,8 +34,17 @@ import bridge_agent
 import bridge_health
 import bridge_protocol
 import bridges
+import export_bridge
+import export_store
 from export_bridge import ExportBridge
 from export_store import ExportStore
+
+#: Step 4: progress of moving the built-in bridge into a bridge device (JSON:
+#: {"deviceId": …, "stage": created|stopped|stored|prefs|done}).
+MIGRATION_PREF = "legacyBridgeMigration"
+#: Every setting the built-in bridge keeps for ITSELF (the rest are global).
+LEGACY_BRIDGE_KEYS = (export_store.PREF_KEY, export_store.PREF_KEY_CORRUPT,
+                      export_bridge.PREF_PENDING_REPLACE_ALL, "exportParked")
 
 
 def _bridge_device_or_none(device_id: int):
@@ -174,7 +185,8 @@ class BridgeDeviceMixin:
         """
         devices = sorted(self._device_runtimes(), key=lambda rt: str(rt.name).lower())
         options = [(str(rt.device_id), str(rt.name)) for rt in devices]
-        options.append(("0", "Legacy bridge (no bridge device)"))
+        if len(self._legacy_runtime().store or ()) or not devices:
+            options.append(("0", "Legacy bridge (no bridge device)"))
         raw = str((valuesDict or {}).get("bridgeTarget", "") or "").strip()
         if raw and raw in {value for value, _ in options}:
             self._current_bridge_id = int(raw) if raw != "0" else None
@@ -221,7 +233,7 @@ class BridgeDeviceMixin:
 
     def _used_bridge_slots(self, devId) -> set:
         """Slots taken by OTHER bridge devices — saved, or running but not yet saved."""
-        used = {bridges.LEGACY_SLOT}
+        used = set()  # step 4: slot 0 is no longer the built-in bridge's
         for dev in indigo.devices.iter("self"):
             if dev.deviceTypeId == bridges.BRIDGE_DEVICE_TYPE and dev.id != devId:
                 slot = bridges.slot_of(dev.pluginProps)
@@ -363,6 +375,176 @@ ol {{ text-align:left; padding-left:20px; }} li {{ margin:6px 0; }}
             handle.write(page)
         return path
 
+    # ------------------------------------------------------------------
+    # Step 4: unpair / reset in the device dialog (own field ids: the two
+    # menu dialogs both called their tick-boxes confirm/confirmAgain)
+    # ------------------------------------------------------------------
+    def _run_menu_for_bridge(self, devId, valuesDict, menu, fields: dict, error_field: str):
+        record = (getattr(self, "bridge_runtimes", None) or {}).get(devId)
+        if record is None:
+            errors = indigo.Dict()
+            errors[error_field] = "This bridge is not running — see the event log."
+            return (valuesDict, errors)
+        menu_values = {menu_key: valuesDict.get(dialog_key) for dialog_key, menu_key in fields.items()}
+        with self._targeting(record):
+            result = menu(menu_values)
+        if result[0]:
+            for dialog_key, menu_key in fields.items():
+                if menu_key.startswith("confirm"):
+                    valuesDict[dialog_key] = False
+            return valuesDict
+        errors = indigo.Dict()
+        reverse = {menu_key: dialog_key for dialog_key, menu_key in fields.items()}
+        for key, message in dict(result[2]).items():
+            errors[reverse.get(key, error_field)] = message
+        return (valuesDict, errors)
+
+    # pylint: disable-next=unused-argument
+    def bridgeDeviceUnpair(self, valuesDict, typeId="", devId=0):  # noqa: N802, ARG002
+        """The device dialog's "Unpair ecosystem": Unpair an Ecosystem, for THIS bridge."""
+        return self._run_menu_for_bridge(
+            devId, valuesDict, self.menuUnpairEcosystem,  # pylint: disable=no-member
+            {"fabric": "fabric", "unpairConfirm": "confirm", "unpairConfirmAgain": "confirmAgain"},
+            "fabric")
+
+    # pylint: disable-next=unused-argument
+    def bridgeDeviceReset(self, valuesDict, typeId="", devId=0):  # noqa: N802, ARG002
+        """The device dialog's "Reset all pairings": Reset Pairings, for THIS bridge."""
+        return self._run_menu_for_bridge(
+            devId, valuesDict, self.menuResetBridgePairings,  # pylint: disable=no-member
+            {"resetConfirm": "confirm", "resetConfirmAgain": "confirmAgain"},
+            "resetConfirmAgain")
+
+    # ------------------------------------------------------------------
+    # Step 4: moving the built-in bridge into a bridge device
+    # ------------------------------------------------------------------
+    def _migration_marker(self) -> dict:
+        try:
+            marker = json.loads(self.pluginPrefs.get(MIGRATION_PREF, "") or "{}")
+        except (TypeError, ValueError, AttributeError):
+            return {}
+        return marker if isinstance(marker, dict) else {}
+
+    def _write_migration_marker(self, marker: dict) -> None:
+        self.pluginPrefs[MIGRATION_PREF] = json.dumps(marker)
+        self._save_plugin_prefs()  # pylint: disable=no-member  # ExportDialogMixin
+
+    def _legacy_bridge_storage(self) -> str:
+        return bridge_agent.BridgeProcess(dict(self.pluginPrefs), self.logger).storage_path
+
+    def _legacy_bridge_in_use(self) -> bool:
+        """Has the built-in bridge anything worth moving: exports, or a storage folder?"""
+        raw = str(self.pluginPrefs.get(export_store.PREF_KEY, "") or "")
+        if '"indigoDeviceId"' in raw:
+            return True
+        path = self._legacy_bridge_storage()
+        try:
+            return os.path.isdir(path) and any(os.scandir(path))
+        except OSError:
+            return False
+
+    @staticmethod
+    def _move_bridge_storage(src: str, dst: str) -> None:
+        """Move a bridge's storage, keeping a backup copy of the original. Repeatable."""
+        if not os.path.isdir(src):
+            return  # moved already, or the bridge never ran
+        backup = os.path.normpath(src) + ".pre-device-backup"
+        if not os.path.exists(backup):
+            shutil.copytree(src, backup, symlinks=True)
+        if os.path.exists(dst):
+            # Something got there first (a half-finished attempt): keep it aside, never delete it.
+            os.rename(dst, os.path.normpath(dst) + ".discarded")
+        os.makedirs(os.path.dirname(os.path.normpath(dst)), exist_ok=True)
+        shutil.move(src, dst)
+
+    def _retire_health_device(self) -> None:
+        """Delete the standing Matter Bridge Health device: every bridge device has its states."""
+        try:
+            device = bridge_health._find_health_device_only(self.logger)  # pylint: disable=protected-access
+        except Exception:  # pylint: disable=broad-except
+            device = None
+        if device is None:
+            return
+        name = str(device.name)
+        indigo.device.delete(device)
+        self.logger.info(
+            'Matter bridge: removed the "%s" device — every Matter Bridge device now carries the same '
+            "health states (subscriptionHealth, churnDetail, fabric1Name … fabric5Health). Point any "
+            "trigger or control page that used it at the bridge device.", name)
+
+    def _migrate_legacy_bridge(self) -> None:
+        """Move the built-in bridge into a Matter Bridge device on slot 0 (step 4).
+
+        Runs at startup BEFORE the built-in bridge is built. Every stage is
+        recorded before the next begins and is safe to repeat, so a stop
+        part-way through finishes on the next start. Nothing is deleted: the
+        storage folder is moved with a backup copy kept beside the original.
+        """
+        try:
+            marker = self._migration_marker()
+            if marker.get("stage") == "done":
+                return
+            if not marker and not self._legacy_bridge_in_use():
+                return
+            dev = None
+            if marker.get("deviceId"):
+                try:
+                    dev = indigo.devices[int(marker["deviceId"])]
+                except (KeyError, ValueError, TypeError):
+                    dev = None
+            if dev is None:
+                dev = indigo.device.create(
+                    protocol=indigo.kProtocol.Plugin,
+                    deviceTypeId=bridges.BRIDGE_DEVICE_TYPE,
+                    name=bridge_health._unique_health_device_name(indigo, "Matter Bridge"),  # pylint: disable=protected-access
+                    props={bridges.PROP_SLOT: "0"},
+                )
+                marker = {"deviceId": dev.id, "stage": "created"}
+                self._write_migration_marker(marker)
+                self.logger.info('Matter bridge: moving the built-in bridge into the new Matter Bridge '
+                                 'device "%s" — its pairings, ports and exported devices come with it.',
+                                 dev.name)
+            if marker["stage"] == "created":
+                bridge_agent.BridgeProcess(dict(self.pluginPrefs), self.logger).uninstall()
+                marker["stage"] = "stopped"
+                self._write_migration_marker(marker)
+            if marker["stage"] == "stopped":
+                new_storage = bridge_agent.bridge_instance(dev.id, 0).storage_path
+                self._move_bridge_storage(self._legacy_bridge_storage(), new_storage)
+                marker["stage"] = "stored"
+                self._write_migration_marker(marker)
+            if marker["stage"] == "stored":
+                namespace = bridges.NamespacedPrefs(lambda: self.pluginPrefs, bridges.prefs_prefix(dev.id))
+                for key in LEGACY_BRIDGE_KEYS:
+                    if key in self.pluginPrefs:
+                        namespace[key] = self.pluginPrefs[key]
+                        del self.pluginPrefs[key]
+                marker["stage"] = "prefs"
+                self._write_migration_marker(marker)
+            if marker["stage"] == "prefs":
+                self._retire_health_device()
+                marker["stage"] = "done"
+                self._write_migration_marker(marker)
+                self.logger.info('Matter bridge: the built-in bridge is now the Matter Bridge device "%s". '
+                                 "A backup of its storage is kept beside the original folder.", dev.name)
+        except Exception as exc:  # pylint: disable=broad-except
+            self.logger.error("Matter bridge: moving the built-in bridge into a Matter Bridge device "
+                              "stopped part-way (%s). Nothing is lost; it carries on at the next "
+                              "plugin start.", exc)
+            self.logger.exception(exc)
+
+    def _start_waiting_bridge_devices(self) -> None:
+        """End of startup: start any enabled bridge device that is not running yet."""
+        for dev in list(indigo.devices.iter("self")):
+            if dev.deviceTypeId != bridges.BRIDGE_DEVICE_TYPE or not getattr(dev, "enabled", True):
+                continue
+            if dev.id in (getattr(self, "bridge_runtimes", None) or {}):
+                continue
+            try:
+                self._start_bridge_device(dev)
+            except Exception as exc:  # pylint: disable=broad-except
+                self.logger.exception(exc)
+
     def _bridge_dialog_closed(self, devId) -> None:
         if getattr(self, "_current_bridge_id", None) == devId:
             self._current_bridge_id = None
@@ -437,7 +619,14 @@ ol {{ text-align:left; padding-left:20px; }} li {{ margin:6px 0; }}
         ``slot`` is given only by a new device's first dialog, before it is saved.
         """
         slot = bridges.slot_of(dev.pluginProps) if slot is None else slot
-        if slot is None or slot == bridges.LEGACY_SLOT:
+        marker = self._migration_marker()
+        if marker.get("deviceId") == dev.id and marker.get("stage") != "done":
+            self.logger.debug("Matter bridge %s: waiting for the built-in bridge to finish moving in", dev.id)
+            return
+        running = (getattr(self, "bridge_runtimes", None) or {}).get(dev.id)
+        if running is not None and running.slot == slot:
+            return  # already running on this slot (the startup catch-up got here first)
+        if slot is None:
             self._refuse_bridge_device(dev, "it has no port slot yet — open its settings and click Save")
             return
         wanted = bridge_agent.bridge_instance(dev.id, slot)

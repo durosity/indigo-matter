@@ -228,40 +228,45 @@ def _menu_item(item_id):
     raise AssertionError(f"{item_id} menu item missing")
 
 
+def _bridge_device_field(field_id):
+    """A field of the Matter Bridge device dialog (fork step 4: pairing moved there)."""
+    root = ET.parse(str(MENU_ITEMS_XML).replace("MenuItems.xml", "Devices.xml")).getroot()
+    field = root.find(f"./Device[@id='matterBridge']/ConfigUI/Field[@id='{field_id}']")
+    assert field is not None, f"{field_id} missing from the Matter Bridge device dialog"
+    return field
+
+
 def _config_fields():
     return {f.get("id"): f for f in ET.parse(PLUGIN_CONFIG_XML).getroot().findall("Field")}
 
 
 class TestMenuShape:
     def test_the_pair_menu_exists_and_is_wired(self, plugin_mod):
-        item = _menu_item("pairMatterBridge")
-        assert item.findtext("CallbackMethod") == "menuPairMatterBridge"
-        assert hasattr(plugin_mod.Plugin, "menuPairMatterBridge")
-        # A CallbackMethod plus a ConfigUI means Execute/Cancel; the button says
-        # what it does rather than "Execute".
-        assert item.findtext("ButtonTitle") == "Open pairing window"
+        # fork step 4: pairing lives in the Matter Bridge device dialog
+        button = _bridge_device_field("bridgePair")
+        assert button.findtext("CallbackMethod") == "bridgeDeviceShowQr"
+        assert hasattr(plugin_mod.Plugin, "menuPairMatterBridge"), "still the engine behind it"
+        assert button.findtext("Title") == "Show pairing QR code"
 
     def test_the_pair_dialog_defaults_to_the_900_second_maximum(self):
-        fields = {f.get("id"): f for f in _menu_item("pairMatterBridge")
-                  .find("ConfigUI").findall("Field")}
-        assert fields["duration"].get("defaultValue") == "900"
-        intro = fields["pairIntro"].findtext("Label")
-        assert "EVENT LOG" in intro, "the user must be told where the code appears"
-        assert "uncertified" in intro, "expected in every ecosystem — say so first"
+        assert _bridge_device_field("duration").get("defaultValue") == "900"
+        intro = _bridge_device_field("bridgePairHelp").findtext("Label")
+        assert "event log" in intro, "the user must be told where the code appears"
 
     def test_the_unpair_menu_demands_TWO_ticks_and_a_dynamic_picker(self, plugin_mod):
-        item = _menu_item("unpairEcosystem")
-        assert item.findtext("CallbackMethod") == "menuUnpairEcosystem"
+        # fork step 4: unpair lives in the Matter Bridge device dialog
+        assert _bridge_device_field("bridgeUnpair").findtext("CallbackMethod") == "bridgeDeviceUnpair"
         assert hasattr(plugin_mod.Plugin, "menuUnpairEcosystem")
-        fields = {f.get("id"): f for f in item.find("ConfigUI").findall("Field")}
-        for name in ("confirm", "confirmAgain"):
+        fields = {name: _bridge_device_field(name)
+                  for name in ("unpairConfirm", "unpairConfirmAgain", "fabric", "bridgeUnpairHelp")}
+        for name in ("unpairConfirm", "unpairConfirmAgain"):
             assert fields[name].get("type") == "checkbox"
             assert fields[name].get("defaultValue") == "false"
         picker = fields["fabric"].find("List")
         assert picker.get("method") == "getBridgeFabrics"
         assert hasattr(plugin_mod.Plugin, "getBridgeFabrics")
         # The last-fabric case E5 hardened must be named before it happens.
-        assert "resets itself" in fields["unpairWarning"].findtext("Label")
+        assert "resets the bridge" in fields["bridgeUnpairHelp"].findtext("Label")
 
     def test_the_bridge_install_menu_is_a_sibling_of_the_controllers(self, plugin_mod):
         """Separately versioned packages, separately installed: a user recovering

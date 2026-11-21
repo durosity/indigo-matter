@@ -170,6 +170,18 @@ Done (each commit tested in full before landing; suite about 4650 passing):
   else the device's own on/off (relays and dimmers only), inverted if ticked.
   Not mappable: colour lights, thermostat, vacuum. Changing an exported
   device's type creates a new accessory in each ecosystem.
+- step 4 — the built-in bridge becomes a device (`step4.py`): at startup, if
+  the built-in bridge has exports or storage, `_migrate_legacy_bridge` creates
+  a Matter Bridge device on slot 0 (same ports), removes the built-in
+  LaunchAgent, moves its storage folder (backup kept as
+  `<storage>.pre-device-backup`), moves its own settings (`LEGACY_BRIDGE_KEYS`)
+  into the device's namespace and deletes the Matter Bridge Health device.
+  Progress lives in `legacyBridgeMigration`; every stage repeats safely and the
+  device will not start until it is `done`. Slot 0 is no longer reserved.
+  Unpair and reset moved into the device dialog; the Manage Exports, Pair
+  Bridge, Unpair and Reset menu items are gone. Still in the menu with a Bridge
+  popup: Pair Vacuum, Stop Bridge Node, Rebuild Endpoint Map, Migrate Export;
+  fabric backup/restore and CT calibration still act on the built-in bridge.
 - Known gaps, by design for now: device bridges ignore the global "Enable Matter export" switch (absent `exportEnabled` reads
   as on); fabric backup/restore and CT calibration act on the legacy bridge
   only; no "on bridge X" exclusion yet, so one device CAN be on two bridges

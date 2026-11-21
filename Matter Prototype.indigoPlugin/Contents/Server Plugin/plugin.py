@@ -252,6 +252,7 @@ class Plugin(HttpApiMixin, ExportDialogMixin, PairingMenuMixin, MatterServerMenu
         # self.pluginPrefs when the user saves the PluginConfig dialog, and a
         # store holding the old mapping would write to an orphan. savePluginPrefs
         # is the flush the store commits through before it trusts a write.
+        self._migrate_legacy_bridge()  # step 4: BEFORE the built-in bridge reads its prefs
         self.exports = ExportStore(
             lambda: self.pluginPrefs, self.logger,
             save_prefs=self._save_plugin_prefs,
@@ -360,6 +361,7 @@ class Plugin(HttpApiMixin, ExportDialogMixin, PairingMenuMixin, MatterServerMenu
         self._ct_calibration = CTCalibrationEngine(
             self.exports, self._indigo_device, self.export_bridge.ct_learner, self.logger)
         self._exports_changed()
+        self._start_waiting_bridge_devices()  # step 4
 
         if fork_identity.EXPORT_ONLY:
             # fork: export-only. Never dial a matter-server — upstream's would

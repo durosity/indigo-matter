@@ -1523,6 +1523,44 @@
                 <Title>Show pairing QR code</Title>
                 <CallbackMethod>bridgeDeviceShowQr</CallbackMethod>
             </Field>
+            <Field id="bridgeUnpairSeparator" type="separator"/>
+            <Field id="bridgeUnpairHelp" type="label">
+                <Label>Unpair ONE ecosystem from this bridge: every accessory this bridge exports disappears from it, with the rooms, scenes and automations built on them there. Other ecosystems are unaffected. Unpairing the LAST one resets the bridge.</Label>
+            </Field>
+            <Field id="fabric" type="menu">
+                <Label>Ecosystem:</Label>
+                <List class="self" method="getBridgeFabrics" dynamicReload="true"/>
+            </Field>
+            <Field id="unpairConfirm" type="checkbox" defaultValue="false">
+                <Label></Label>
+                <Description>I understand every exported accessory will be removed from that ecosystem.</Description>
+            </Field>
+            <Field id="unpairConfirmAgain" type="checkbox" defaultValue="false">
+                <Label></Label>
+                <Description>I have read the warning above and want to unpair it now.</Description>
+            </Field>
+            <Field id="bridgeUnpair" type="button">
+                <Label></Label>
+                <Title>Unpair ecosystem</Title>
+                <CallbackMethod>bridgeDeviceUnpair</CallbackMethod>
+            </Field>
+            <Field id="bridgeResetSeparator" type="separator"/>
+            <Field id="bridgeResetHelp" type="label">
+                <Label>Reset ALL pairings of this bridge: it forgets every ecosystem and advertises for pairing again. Every accessory it exports disappears from every ecosystem.</Label>
+            </Field>
+            <Field id="resetConfirm" type="checkbox" defaultValue="false">
+                <Label></Label>
+                <Description>I understand this removes this bridge from every ecosystem.</Description>
+            </Field>
+            <Field id="resetConfirmAgain" type="checkbox" defaultValue="false">
+                <Label></Label>
+                <Description>I have read the warning above and want to reset it now.</Description>
+            </Field>
+            <Field id="bridgeReset" type="button">
+                <Label></Label>
+                <Title>Reset all pairings</Title>
+                <CallbackMethod>bridgeDeviceReset</CallbackMethod>
+            </Field>
         </ConfigUI>
         <States>
             <State id="status">

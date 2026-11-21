@@ -118,7 +118,7 @@ def test_opening_a_dialog_resets_the_choice_to_the_first_entry(plug, devices):
     _start(plug, devices, 600, "Garden", 2)
     plug._current_bridge_id = 500
     options = plug.getBridgeTargets()
-    assert options == [("600", "Garden"), ("500", "Upstairs"), ("0", "Legacy bridge (no bridge device)")]
+    assert options == [("600", "Garden"), ("500", "Upstairs")], "step 4: no empty built-in bridge"
     assert plug._current_bridge_id == 600, "the dialog shows the first entry selected"
 
 
@@ -127,8 +127,8 @@ def test_a_reload_keeps_the_choice_the_popup_shows(plug, devices):
     _start(plug, devices, 600, "Garden", 2)
     plug.getBridgeTargets(valuesDict={"bridgeTarget": "500"})
     assert plug._current_bridge_id == 500
-    plug.getBridgeTargets(valuesDict={"bridgeTarget": "0"})
-    assert plug._current_bridge_id is None
+    plug.getBridgeTargets(valuesDict={"bridgeTarget": "600"})
+    assert plug._current_bridge_id == 600
 
 
 def test_with_no_bridge_devices_the_popup_offers_the_legacy_bridge(plug):
@@ -140,10 +140,10 @@ def test_with_no_bridge_devices_the_popup_offers_the_legacy_bridge(plug):
 # ---------------------------------------------------------------------------
 # slots
 # ---------------------------------------------------------------------------
-def test_a_new_bridge_device_gets_the_lowest_free_slot_never_the_legacy_one(plug, devices):
+def test_a_new_bridge_device_gets_the_lowest_free_slot(plug, devices):
     devices.add(_bridge_dev(500, "Upstairs", 1))
     ok, values = plug.validateDeviceConfigUi({}, bridges.BRIDGE_DEVICE_TYPE, 0)
-    assert ok and values[bridges.PROP_SLOT] == "2"
+    assert ok and values[bridges.PROP_SLOT] == "0", "step 4: slot 0 is free once the built-in bridge has moved"
 
 
 def test_a_slot_is_kept_once_allocated(plug, devices):
@@ -155,7 +155,7 @@ def test_a_slot_is_kept_once_allocated(plug, devices):
 def test_a_duplicated_device_gets_its_own_slot(plug, devices):
     devices.add(_bridge_dev(500, "Upstairs", 1))
     ok, values = plug.validateDeviceConfigUi({bridges.PROP_SLOT: "1"}, bridges.BRIDGE_DEVICE_TYPE, 600)
-    assert ok and values[bridges.PROP_SLOT] == "2"
+    assert ok and values[bridges.PROP_SLOT] == "0"
 
 
 # ---------------------------------------------------------------------------
@@ -174,7 +174,7 @@ def test_starting_a_bridge_device_builds_its_own_engine_store_and_ports(plug, de
     assert states["status"] == "idle" and states["online"] is False
 
 
-@pytest.mark.parametrize("slot", [None, bridges.LEGACY_SLOT])
+@pytest.mark.parametrize("slot", [None])
 def test_a_bridge_device_without_a_usable_slot_is_refused(plug, devices, slot):
     _start(plug, devices, slot=slot)
     assert 500 not in plug.bridge_runtimes
@@ -370,11 +370,11 @@ def test_a_bridge_devices_health_is_written_to_the_bridge_device(plug, devices):
 
 def test_the_bridge_device_dialog_is_the_whole_export_panel_plus_pairing():
     dev_ui = ET.parse(SERVER_PLUGIN / "Devices.xml").getroot().find("./Device[@id='matterBridge']/ConfigUI")
-    menu_ui = ET.parse(SERVER_PLUGIN / "MenuItems.xml").getroot().find(
-        "./MenuItem[@id='manageMatterExports']/ConfigUI")
-    panel = {f.get("id") for f in menu_ui} - {"bridgeTarget"}
     fields = {f.get("id") for f in dev_ui}
-    assert panel <= fields, sorted(panel - fields)
+    assert {"exportFilter", "exportDevice", "exportRole", "exportStateKey", "exportName",
+            "exportAdd", "exportDelete", "exportStatus"} <= fields
+    assert ET.parse(SERVER_PLUGIN / "MenuItems.xml").getroot().find(
+        "./MenuItem[@id='manageMatterExports']") is None, "step 4: the device dialog replaced the menu"
     assert "bridgeTarget" not in fields, "the device dialog IS its bridge: no popup"
     assert {"exportRvcStart", "exportRvcModeActionMop", "exportList", "bridgePair"} <= fields
     assert dev_ui.find("Field[@id='bridgePair']/CallbackMethod").text == "bridgeDeviceShowQr"
@@ -383,9 +383,9 @@ def test_the_bridge_device_dialog_is_the_whole_export_panel_plus_pairing():
 def test_opening_a_new_bridge_devices_dialog_starts_its_bridge_and_targets_it(plug, devices):
     devices.add(_bridge_dev(500, "Upstairs", None))
     values, _ = plug.getDeviceConfigUiValues({}, bridges.BRIDGE_DEVICE_TYPE, 500)
-    assert values[bridges.PROP_SLOT] == "1"
+    assert values[bridges.PROP_SLOT] == "0"
     record = plug.bridge_runtimes[500]
-    assert record.slot == 1 and plug.exports is record.store
+    assert record.slot == 0 and plug.exports is record.store
     plug.exports.upsert(ExportEntry(101, "onOffPlugInUnit"))
     assert len(plug._legacy_runtime().store) == 0, "the legacy list is untouched"
     plug.closedDeviceConfigUi(values, False, bridges.BRIDGE_DEVICE_TYPE, 500)
@@ -397,7 +397,7 @@ def test_a_second_new_bridge_does_not_take_an_unsaved_bridges_slot(plug, devices
     devices.add(_bridge_dev(600, "Garden", None))
     plug.getDeviceConfigUiValues({}, bridges.BRIDGE_DEVICE_TYPE, 500)
     values, _ = plug.getDeviceConfigUiValues({}, bridges.BRIDGE_DEVICE_TYPE, 600)
-    assert values[bridges.PROP_SLOT] == "2"
+    assert values[bridges.PROP_SLOT] == "1"
 
 
 def test_a_bridge_dialog_whose_bridge_cannot_run_acts_on_nothing(plug, devices):
@@ -514,8 +514,7 @@ def test_deleting_an_unsaved_bridge_device_still_stops_its_node(plug, devices, p
 
 def test_every_bridge_dialog_opens_with_the_bridge_popup(plugin_mod):
     root = ET.parse(SERVER_PLUGIN / "MenuItems.xml").getroot()
-    for menu_id in ("manageMatterExports", "pairMatterBridge", "pairMatterVacuum", "unpairEcosystem",
-                    "stopBridgeNode", "rebuildEndpointMap", "migrateExport", "resetBridgePairings"):
+    for menu_id in ("pairMatterVacuum", "stopBridgeNode", "rebuildEndpointMap", "migrateExport"):
         first = root.find(f"./MenuItem[@id='{menu_id}']/ConfigUI/Field")
         assert first.get("id") == "bridgeTarget", menu_id
         assert first.find("List").get("method") == "getBridgeTargets"
@@ -529,6 +528,24 @@ def test_every_bridge_dialog_opens_with_the_bridge_popup(plugin_mod):
 def test_port_check_attrs_keep_the_upstream_names_for_the_legacy_bridge():
     assert bridges.port_check_attrs(0) == ("_next_bridge_port_check", "_last_bridge_port_conflict")
     assert bridges.port_check_attrs(500) == ("_next_bridge_port_check_500", "_last_bridge_port_conflict_500")
+
+
+def test_the_device_dialog_unpairs_and_resets_its_own_bridge(plug, devices):
+    _start(plug, devices)
+    seen = []
+
+    def unpair(values):
+        seen.append((plug.export_bridge, dict(values)))
+        return (True, values)
+
+    plug.menuUnpairEcosystem = unpair
+    values = {"fabric": "2", "unpairConfirm": True, "unpairConfirmAgain": True}
+    assert plug.bridgeDeviceUnpair(values, bridges.BRIDGE_DEVICE_TYPE, 500) is values
+    assert seen == [(plug.bridge_runtimes[500].bridge, {"fabric": "2", "confirm": True, "confirmAgain": True})]
+    assert values["unpairConfirm"] is False, "the tick-boxes clear after it is done"
+    plug.menuResetBridgePairings = lambda values: (False, values, {"confirm": "Tick BOTH boxes"})
+    _, errors = plug.bridgeDeviceReset({"resetConfirm": False}, bridges.BRIDGE_DEVICE_TYPE, 500)
+    assert errors["resetConfirm"] == "Tick BOTH boxes"
 
 
 @pytest.mark.parametrize("kwargs, status", [

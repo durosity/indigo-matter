@@ -111,17 +111,18 @@ def _labels(options):
 # MenuItems.xml shape — the constraints the SDK actually imposes
 # ---------------------------------------------------------------------------
 def _menu_item():
-    root = ET.parse(MENU_ITEMS_XML).getroot()
-    for item in root.findall("MenuItem"):
-        if item.get("id") == "manageMatterExports":
+    # fork step 4: the Manage Exports panel now lives in the Matter Bridge device's dialog
+    root = ET.parse(str(MENU_ITEMS_XML).replace("MenuItems.xml", "Devices.xml")).getroot()
+    for item in root.findall("Device"):
+        if item.get("id") == "matterBridge":
             return item
-    raise AssertionError("manageMatterExports menu item missing")
+    raise AssertionError("matterBridge device type missing")
 
 
 def test_menu_item_exists_and_has_no_callback_method():
     """No CallbackMethod → a single Close button, so the buttons do the work."""
     item = _menu_item()
-    assert item.findtext("Name").startswith("Manage Matter Exports")
+    assert item.findtext("Name") == "Matter Bridge"  # fork step 4
     assert item.find("CallbackMethod") is None
     assert item.find("ConfigUI") is not None
 
@@ -1662,15 +1663,15 @@ class TestRecoveryMenusExist:
         assert "No pairing is touched" in warning
 
     def test_the_reset_menu_exists_and_is_wired_to_a_callback(self, plugin_mod):
-        item = _menu_item_by_id("resetBridgePairings")
-        assert item.findtext("CallbackMethod") == "menuResetBridgePairings"
+        item = _menu_item()  # fork step 4: reset lives in the bridge device dialog
+        assert item.find("./ConfigUI/Field[@id='bridgeReset']").findtext("CallbackMethod") == "bridgeDeviceReset"
         assert hasattr(plugin_mod.Plugin, "menuResetBridgePairings")
 
     def test_the_reset_menu_demands_TWO_ticks(self):
         """The only plugin action that destroys every pairing at once."""
-        item = _menu_item_by_id("resetBridgePairings")
+        item = _menu_item()  # fork step 4: reset lives in the bridge device dialog
         fields = {f.get("id"): f for f in item.find("ConfigUI").findall("Field")}
-        for name in ("confirm", "confirmAgain"):
+        for name in ("resetConfirm", "resetConfirmAgain"):
             assert fields[name].get("type") == "checkbox"
             assert fields[name].get("defaultValue") == "false"
 

@@ -126,12 +126,10 @@ MENU_SECTIONS = [
      "Explore Matter attributes (advanced)…",
      "Report Thread mesh…"],
     # 2 · Matter devices Indigo publishes
-    ["Manage Matter Exports…",
-     "Pair Matter Bridge…",
+    [  # fork step 4: Manage Exports, Pair Bridge and Unpair live in the bridge device
      # ADR-0019 — a vacuum is its own accessory with its own code, so it
      # sits beside the bridge's pairing item rather than inside it.
-     "Pair Matter Vacuum…",
-     "Unpair an Ecosystem…"],
+     "Pair Matter Vacuum…"],
     # 3 · the Matter controller (matter-server)
     ["Install/update the Matter controller (matter-server)",
      "Restart the Matter controller",
@@ -146,8 +144,7 @@ MENU_SECTIONS = [
      "Restore a fabric backup…",
      "Rebuild Matter Endpoint Map…",
      "Migrate an exported accessory…",
-     "Recreate Matter node devices…",
-     "Reset Matter Bridge Pairings…"],
+     "Recreate Matter node devices…"],  # fork step 4: Reset lives in the bridge device
 ]
 
 

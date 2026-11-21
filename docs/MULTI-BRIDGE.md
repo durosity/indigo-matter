@@ -135,6 +135,18 @@ Done (each commit tested in full before landing; suite about 4650 passing):
   - Stopping a bridge device's comm leaves its node RUNNING (Indigo stops every
     device on a plugin reload); deleting the device uninstalls the node and
     clears `bridge.<id>.*`; storage is kept.
+- step 2c — the HomeKitLink-style dialog (`step2c.py`): a Matter Bridge
+  DEVICE's own Configure dialog is now that bridge's export manager — the whole
+  Manage Matter Exports panel (picker, role, options, the vacuum's action-group
+  mappings, the export list) generated from the menu dialog's fields at build
+  time, plus an "Open pairing window" button (`bridgeDevicePair`). Opening it
+  targets that bridge (`_bridge_dialog_values`); a NEW device gets its slot and
+  a live bridge right there, so devices can be added before the first Save.
+  A dialog whose bridge cannot run targets nothing, never the legacy bridge.
+  Save keeps only `bridgeSlot` in the props. The menu dialogs (with their
+  Bridge popup) remain for the legacy bridge until step 5. NB the panel's
+  fields now exist twice (MenuItems.xml and Devices.xml): change them in
+  MenuItems.xml and regenerate, or retire the menu item in step 5.
 - Known gaps, by design for now: device bridges have no health device (their
   own states stand in; the shared `matterBridgeHealth` stays legacy's); they
   ignore the global "Enable Matter export" switch (absent `exportEnabled` reads

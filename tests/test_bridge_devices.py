@@ -349,6 +349,82 @@ def test_the_bridge_device_type_is_declared_with_its_states():
     assert dev.find("ConfigUI/Field[@id='bridgeSlot']").get("hidden") == "true"
 
 
+def test_the_bridge_device_dialog_is_the_whole_export_panel_plus_pairing():
+    dev_ui = ET.parse(SERVER_PLUGIN / "Devices.xml").getroot().find("./Device[@id='matterBridge']/ConfigUI")
+    menu_ui = ET.parse(SERVER_PLUGIN / "MenuItems.xml").getroot().find(
+        "./MenuItem[@id='manageMatterExports']/ConfigUI")
+    panel = {f.get("id") for f in menu_ui} - {"bridgeTarget"}
+    fields = {f.get("id") for f in dev_ui}
+    assert panel <= fields, sorted(panel - fields)
+    assert "bridgeTarget" not in fields, "the device dialog IS its bridge: no popup"
+    assert {"exportRvcStart", "exportRvcModeActionMop", "exportList", "bridgePair"} <= fields
+    assert dev_ui.find("Field[@id='bridgePair']/CallbackMethod").text == "bridgeDevicePair"
+
+
+def test_opening_a_new_bridge_devices_dialog_starts_its_bridge_and_targets_it(plug, devices):
+    devices.add(_bridge_dev(500, "Upstairs", None))
+    values, _ = plug.getDeviceConfigUiValues({}, bridges.BRIDGE_DEVICE_TYPE, 500)
+    assert values[bridges.PROP_SLOT] == "1"
+    record = plug.bridge_runtimes[500]
+    assert record.slot == 1 and plug.exports is record.store
+    plug.exports.upsert(ExportEntry(101, "onOffPlugInUnit"))
+    assert len(plug._legacy_runtime().store) == 0, "the legacy list is untouched"
+    plug.closedDeviceConfigUi(values, False, bridges.BRIDGE_DEVICE_TYPE, 500)
+    assert plug.exports is plug._legacy_runtime().store
+
+
+def test_a_second_new_bridge_does_not_take_an_unsaved_bridges_slot(plug, devices):
+    devices.add(_bridge_dev(500, "Upstairs", None))
+    devices.add(_bridge_dev(600, "Garden", None))
+    plug.getDeviceConfigUiValues({}, bridges.BRIDGE_DEVICE_TYPE, 500)
+    values, _ = plug.getDeviceConfigUiValues({}, bridges.BRIDGE_DEVICE_TYPE, 600)
+    assert values[bridges.PROP_SLOT] == "2"
+
+
+def test_a_bridge_dialog_whose_bridge_cannot_run_acts_on_nothing(plug, devices):
+    plug.runtime = None          # cannot start a bridge
+    devices.add(_bridge_dev(500, "Upstairs", None))
+    plug.getDeviceConfigUiValues({}, bridges.BRIDGE_DEVICE_TYPE, 500)
+    assert plug.exports is None and plug.export_bridge is None, "never the legacy bridge"
+
+
+def test_saving_a_bridge_device_keeps_only_its_slot(plug, devices):
+    ok, values = plug.validateDeviceConfigUi(
+        {bridges.PROP_SLOT: "3", "exportDevice": "101", "exportName": "x", "duration": "900"},
+        bridges.BRIDGE_DEVICE_TYPE, 500)
+    assert ok and dict(values) == {bridges.PROP_SLOT: "3"}
+
+
+def test_the_dialog_pairing_button_pairs_its_own_bridge(plug, devices):
+    devices.add(_bridge_dev(500, "Upstairs", None))
+    plug.getDeviceConfigUiValues({}, bridges.BRIDGE_DEVICE_TYPE, 500)
+    seen = []
+    plug.menuPairMatterBridge = lambda values: seen.append(plug.export_bridge) or (True, values)
+    plug._current_bridge_id = None   # even with nothing targeted, the button knows its bridge
+    assert plug.bridgeDevicePair({"duration": "900"}, bridges.BRIDGE_DEVICE_TYPE, 500) == {"duration": "900"}
+    assert seen == [plug.bridge_runtimes[500].bridge]
+    _, errors = plug.bridgeDevicePair({}, bridges.BRIDGE_DEVICE_TYPE, 999)
+    assert "duration" in errors
+
+
+def test_deleting_an_unsaved_bridge_device_still_stops_its_node(plug, devices, plugin_mod, monkeypatch):
+    built = []
+
+    class _Agent:
+        def __init__(self, prefs, logger, instance=None):
+            built.append(instance)
+
+        def uninstall(self):
+            built.append("uninstall")
+
+    monkeypatch.setattr(plugin_mod.bridge_agent, "BridgeProcess", _Agent)
+    dev = _bridge_dev(500, "Upstairs", None)
+    devices.add(dev)
+    plug.getDeviceConfigUiValues({}, bridges.BRIDGE_DEVICE_TYPE, 500)
+    plug.deviceDeleted(dev)
+    assert built and built[-1] == "uninstall"
+
+
 def test_every_bridge_dialog_opens_with_the_bridge_popup(plugin_mod):
     root = ET.parse(SERVER_PLUGIN / "MenuItems.xml").getroot()
     for menu_id in ("manageMatterExports", "pairMatterBridge", "pairMatterVacuum", "unpairEcosystem",

@@ -1522,6 +1522,9 @@ class Plugin(HttpApiMixin, ExportDialogMixin, PairingMenuMixin, MatterServerMenu
     def getDeviceConfigUiValues(self, pluginProps, typeId, devId):  # noqa: N802
         """Seed the Edit Device dialog with this device's CURRENT settings.
 
+        A Matter Bridge device's dialog is that bridge's export manager instead
+        (BridgeDeviceMixin._bridge_dialog_values).
+
         Runs every time the dialog opens, and re-seeds from the device's Indigo
         states rather than from saved props — the device is the source of truth
         for a setting, not Indigo. That is what keeps the dialog honest when the
@@ -1532,6 +1535,8 @@ class Plugin(HttpApiMixin, ExportDialogMixin, PairingMenuMixin, MatterServerMenu
         No live Matter read happens here: this is the Indigo UI thread, and a
         read from a sleepy device is seconds. See the device_settings docstring.
         """
+        if typeId == bridges.BRIDGE_DEVICE_TYPE:
+            return (indigo.Dict(self._bridge_dialog_values(pluginProps, devId)), indigo.Dict())
         values = dict(pluginProps)
         # A brand-new device (devId 0) or one deleted mid-dialog has no states
         # and no node, so device_known below is False and the section is hidden.
@@ -1632,11 +1637,17 @@ class Plugin(HttpApiMixin, ExportDialogMixin, PairingMenuMixin, MatterServerMenu
         goes onto the asyncio loop and reports through the event log and the
         device's error state instead of a dialog.
 
+        A Matter Bridge device's dialog applies its changes as they are made;
+        closing it only stops it targeting that bridge.
+
         The consequence worth knowing: a failure surfaces AFTER the dialog has
         closed. It is logged as an error, the device is marked in error, and
         because the dialog re-seeds from device state on every open, reopening
         it shows what the device actually holds — never the value that failed.
         """
+        if typeId == bridges.BRIDGE_DEVICE_TYPE:
+            self._bridge_dialog_closed(devId)
+            return
         if userCancelled or not settings_for_type(typeId):
             return
         try:

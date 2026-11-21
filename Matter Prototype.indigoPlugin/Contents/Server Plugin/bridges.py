@@ -139,6 +139,7 @@ class BridgeRuntime:
     bridge: Any = None       # export_bridge.ExportBridge
     process: Any = None      # bridge_agent.BridgeProcess (built on demand)
     exported_ids: frozenset = field(default_factory=frozenset)
+    slot: Any = None         # int once running; a new device's slot lives here before its first Save
 
 
 #: The slot the legacy single bridge ("Manage Matter Exports…" with no bridge

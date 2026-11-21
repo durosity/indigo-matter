@@ -76,9 +76,15 @@ class BridgeDeviceMixin:
         pinned = getattr(local, "runtime", None) if local is not None else None
         if pinned is not None:
             return pinned
-        runtimes = getattr(self, "bridge_runtimes", None) or {}
-        chosen = runtimes.get(getattr(self, "_current_bridge_id", None))
-        return chosen if chosen is not None else self._legacy_runtime()
+        chosen_id = getattr(self, "_current_bridge_id", None)
+        if chosen_id is None:
+            return self._legacy_runtime()
+        chosen = (getattr(self, "bridge_runtimes", None) or {}).get(chosen_id)
+        if chosen is not None:
+            return chosen
+        # A bridge device's dialog is open but its bridge is not running: act on
+        # NOTHING (no store, no engine) rather than silently on the legacy bridge.
+        return bridges.BridgeRuntime(device_id=chosen_id, name="(not running)", instance=None, prefs=None)
 
     @contextlib.contextmanager
     def _targeting(self, runtime: bridges.BridgeRuntime):
@@ -194,12 +200,7 @@ class BridgeDeviceMixin:
         and the reaper's port check). Indigo's "Duplicate Device" copies props,
         so a held slot is what a duplicate looks like; that one is reallocated.
         """
-        used = {bridges.LEGACY_SLOT}
-        for dev in indigo.devices.iter("self"):
-            if dev.deviceTypeId == bridges.BRIDGE_DEVICE_TYPE and dev.id != devId:
-                slot = bridges.slot_of(dev.pluginProps)
-                if slot is not None:
-                    used.add(slot)
+        used = self._used_bridge_slots(devId)
         slot = bridges.slot_of(valuesDict)
         if slot is None or slot in used:
             try:
@@ -209,7 +210,70 @@ class BridgeDeviceMixin:
                 errors["showAlertText"] = f"No more Matter bridges can be created on this Mac: {exc}."
                 return (False, valuesDict, errors)
             valuesDict[bridges.PROP_SLOT] = str(slot)
+        # Everything else in the dialog is the export panel's working state (the
+        # export list itself lives with the bridge): keep it out of the props, so
+        # a Save does not change them and Indigo does not restart the bridge.
+        for key in [k for k in valuesDict.keys() if k != bridges.PROP_SLOT]:
+            del valuesDict[key]
         return (True, valuesDict)
+
+    def _used_bridge_slots(self, devId) -> set:
+        """Slots taken by OTHER bridge devices — saved, or running but not yet saved."""
+        used = {bridges.LEGACY_SLOT}
+        for dev in indigo.devices.iter("self"):
+            if dev.deviceTypeId == bridges.BRIDGE_DEVICE_TYPE and dev.id != devId:
+                slot = bridges.slot_of(dev.pluginProps)
+                if slot is not None:
+                    used.add(slot)
+        for record in self._device_runtimes():
+            if record.device_id != devId and record.slot is not None:
+                used.add(record.slot)
+        return used
+
+    def _bridge_dialog_values(self, pluginProps, devId):
+        """Open a bridge device's dialog: make sure its bridge runs, then target it.
+
+        A brand-new device gets its slot and a live bridge right here, so devices
+        can be added before the first Save (as in HomeKitLink). The slot rides in
+        the dialog's values and is saved with the device on Save.
+        """
+        values = dict(pluginProps)
+        if devId and devId not in (getattr(self, "bridge_runtimes", None) or {}):
+            used = self._used_bridge_slots(devId)
+            slot = bridges.slot_of(values)
+            if slot is None or slot in used:
+                try:
+                    slot = bridges.allocate_slot(used)
+                except ValueError as exc:
+                    self.logger.error("No more Matter bridges can be created on this Mac: %s.", exc)
+                    slot = None
+            if slot is not None:
+                values[bridges.PROP_SLOT] = str(slot)
+                try:
+                    self._start_bridge_device(indigo.devices[devId], slot)
+                except Exception as exc:  # pylint: disable=broad-except
+                    # the dialog must still open; it then acts on nothing
+                    self.logger.exception(exc)
+        self._current_bridge_id = devId or None
+        return values
+
+    def _bridge_dialog_closed(self, devId) -> None:
+        if getattr(self, "_current_bridge_id", None) == devId:
+            self._current_bridge_id = None
+
+    # pylint: disable-next=unused-argument
+    def bridgeDevicePair(self, valuesDict, typeId="", devId=0):  # noqa: N802, ARG002
+        """The device dialog's "Open pairing window": Pair Matter Bridge, for THIS bridge."""
+        record = (getattr(self, "bridge_runtimes", None) or {}).get(devId)
+        if record is None:
+            errors = indigo.Dict()
+            errors["duration"] = "This bridge is not running — see the event log."
+            return (valuesDict, errors)
+        with self._targeting(record):
+            result = self.menuPairMatterBridge(valuesDict)  # pylint: disable=no-member  # PairingMenuMixin
+        if result[0]:
+            return valuesDict
+        return (valuesDict, result[2])
 
     def _refuse_bridge_device(self, dev, why: str) -> None:
         self.logger.error('Matter bridge "%s" was not started: %s.', dev.name, why)
@@ -226,7 +290,8 @@ class BridgeDeviceMixin:
         prefs = bridges.NamespacedPrefs(
             lambda: self.pluginPrefs, bridges.prefs_prefix(dev.id),
             {bridge_protocol.PREF_WS_PORT: instance.ws_port})
-        record = bridges.BridgeRuntime(device_id=dev.id, name=str(dev.name), instance=instance, prefs=prefs)
+        record = bridges.BridgeRuntime(device_id=dev.id, name=str(dev.name), instance=instance, prefs=prefs,
+                                       slot=slot)
         record.store = ExportStore(
             lambda: record.prefs, self.logger,
             save_prefs=self._save_plugin_prefs,  # pylint: disable=no-member  # ExportDialogMixin
@@ -248,9 +313,12 @@ class BridgeDeviceMixin:
         )
         return record
 
-    def _start_bridge_device(self, dev) -> None:
-        """``deviceStartComm`` for a bridge device: build its runtime and let it start itself."""
-        slot = bridges.slot_of(dev.pluginProps)
+    def _start_bridge_device(self, dev, slot=None) -> None:
+        """``deviceStartComm`` for a bridge device: build its runtime and let it start itself.
+
+        ``slot`` is given only by a new device's first dialog, before it is saved.
+        """
+        slot = bridges.slot_of(dev.pluginProps) if slot is None else slot
         if slot is None or slot == bridges.LEGACY_SLOT:
             self._refuse_bridge_device(dev, "it has no port slot yet — open its settings and click Save")
             return
@@ -312,9 +380,12 @@ class BridgeDeviceMixin:
         uninstall leaves it: deleting files nobody can recreate is not this
         callback's call to make.
         """
-        if dev.id in (getattr(self, "bridge_runtimes", None) or {}):
+        running = (getattr(self, "bridge_runtimes", None) or {}).get(dev.id)
+        # A device deleted before its first Save has its slot only on the record.
+        slot = running.slot if running is not None and running.slot is not None \
+            else bridges.slot_of(getattr(dev, "pluginProps", None))
+        if running is not None:
             self._stop_bridge_device(dev)
-        slot = bridges.slot_of(getattr(dev, "pluginProps", None))
         storage = "(unknown)"
         if slot is not None:
             try:

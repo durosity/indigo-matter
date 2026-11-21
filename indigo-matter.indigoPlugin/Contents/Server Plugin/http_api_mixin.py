@@ -313,6 +313,19 @@ class HttpApiMixin:
         reply["content"] = self._pairing_page(query)
         return reply
 
+    def _pairing_page_bridge(self, query: Optional[dict] = None):
+        """The bridge a pairing page is for: ``?bridge=<device id>``, else the legacy one.
+
+        Never the dialog's current choice — a web page has no dialog, and must
+        not show a different bridge's code because of one open elsewhere.
+        """
+        raw = str((query or {}).get("bridge", "") or "").strip()
+        if raw:
+            record = (getattr(self, "bridge_runtimes", None) or {}).get(int(raw)) if raw.isdigit() else None
+            return record.bridge if record is not None else None
+        legacy = getattr(self, "_legacy_runtime", None)
+        return legacy().bridge if callable(legacy) else self.export_bridge  # pylint: disable=not-callable
+
     def _pairing_page(self, query: Optional[dict] = None) -> str:
         """Build the pairing page's HTML from a live ``get_pairing``.
 
@@ -326,7 +339,8 @@ class HttpApiMixin:
         room, the raw ``MT:`` payload for copying, and a link to the CHIP
         project's own QR viewer for anyone who wants to scan.
         """
-        client = self.export_bridge.client if self.export_bridge is not None else None
+        bridge = self._pairing_page_bridge(query)
+        client = bridge.client if bridge is not None else None
         if client is None or not client.connected:
             return _pairing_html(None, "The plugin is not connected to the Matter bridge node. "
                                        "Export at least one device, then reload this page.")

@@ -6,8 +6,8 @@ HomeKitLink-Siri-style **bridge devices**: create an Indigo device of type
 Several bridges side by side, each its own Matter accessory with its own code.
 
 Status: **phase 1 done** (this fork runs beside upstream, export-only — see
-`fork_identity.py`). Phase 2: **steps 1 and 2a done**, 2b next — see
-"Progress and hand-off" at the end.
+`fork_identity.py`). Phase 2: **steps 1, 2a and 2b done**, Mac acceptance
+test next — see "Progress and hand-off" at the end.
 
 ## What Matter does and does not give you
 
@@ -106,41 +106,44 @@ Done (each commit tested in full before landing; suite about 4650 passing):
   Tests: `tests/test_multi_bridge.py`. (NB `tests/test_bridges.py` is an
   unrelated upstream file — do not overwrite it.)
 
-### Step 2b — the plan worked out so far
-
-UI decision: keep the existing dialogs (Manage Matter Exports, pairing,
-recovery menus) and add a **Bridge** popup at the top of each, rather than
-moving the export picker into the device's ConfigUI. About 60 of the ~90
-singleton references live in those dialogs and keep working unchanged:
-
-- `Plugin.exports`, `Plugin.export_bridge`, `Plugin.bridge_process` become
-  **properties** resolving to the bridge chosen in the open dialog
-  (`self._current_bridge_id`, set by the popup's callback), falling back to the
-  legacy single bridge when no bridge devices exist, so nothing breaks midway.
-  Setters write to the same target (`bridge_agent_menu_mixin` and
-  `pairing_menu_mixin._bridge_restore_control` assign `bridge_process`).
-- Background paths in `plugin.py` must LOOP over every bridge, not resolve one:
-  `deviceUpdated` (forward to all), `deviceDeleted` (remove from whichever
-  store owns it), plugin stop (stop all), `runConcurrentThread` -> `health_tick`
-  (all), `_exports_changed` / `_exported_ids` (union), the status body (sum).
-- `_start_bridge_agent` / `_stop_bridge_agent` / `_bridge_agent_diagnosis`
-  (bridge_agent_menu_mixin) take an optional runtime and use
-  `runtime.process` + `BridgeProcess(..., instance=runtime.instance)` instead
-  of `self.bridge_process`; each bridge's `ExportBridge` gets closures bound to
-  its own runtime (no shared "current" state on the runtime thread).
-- Each `ExportBridge` gets `prefs_getter=lambda: runtime.prefs` where
-  `runtime.prefs = NamespacedPrefs(lambda: self.pluginPrefs, prefs_prefix(id),
-  {bridge_protocol.PREF_WS_PORT: instance.ws_port})` — the engine dials the
-  bridge's own port via the existing `PREF_WS_PORT` lookup (export_bridge.py
-  around L2262). Check `PREF_EXPORT_ENABLED`'s default when absent (~L647).
-- Device type in `Devices.xml`: custom `matterBridge`, states `status`
-  (UiDisplayStateId as a child element), `online`, `paired`, `ecosystems`,
-  `endpoints`, `bridgeVersion`. Slot allocated in `validateDeviceConfigUi`
-  (lowest free among existing bridge devices) and saved as `bridgeSlot`;
-  `deviceStartComm` refuses to start a bridge with no valid slot.
-  `deviceStartComm` builds the runtime; `deviceStopComm` stops it; deleting
-  the device stops the agent and calls `runtime.prefs.clear_namespace()` —
-  storage (fabrics) is left on disk, as upstream's uninstall does.
+- step 2b — Matter Bridge devices (`step2b.py` in claude-xfer). Tests:
+  `tests/test_bridge_devices.py`. What landed, and where it differs from the plan:
+  - `bridge_device_mixin.py` (new, evicted in `conftest.py`): every bridge is a
+    `BridgeRuntime`, the upstream one included (the *legacy* bridge, device id 0,
+    built lazily so `Plugin.__new__` tests work). `exports` / `export_bridge` /
+    `bridge_process` are properties resolving to the target bridge: a
+    **thread-local pin** (`_targeting`) first, then the dialog's Bridge popup,
+    then legacy. The pin is what keeps background work (the install thread,
+    `bridges.legacy_bridge_only` callbacks) off whatever a dialog has selected.
+  - Bridge popup (`bridgeTarget`, first field) in 8 dialogs: Manage Exports,
+    Pair Bridge, Pair Vacuum, Unpair, Stop Bridge, Rebuild Endpoint Map,
+    Migrate, Reset Pairings. It is `dynamicReload` (the Manage dialog's tests
+    require every list to be); `getBridgeTargets` syncs the choice to
+    `valuesDict` and resets it to the first entry when a dialog opens.
+  - Loops over every bridge: `deviceUpdated` (one failing bridge no longer
+    starves the others), `deviceDeleted`, shutdown, the watchdog, the port
+    check (`bridges.port_check_attrs`). `_exports_changed(runtimes=None)`
+    refreshes every id set but nudges only the bridges given (default: target).
+  - Agent seams take an optional runtime (`None` = upstream behaviour);
+    `_new_bridge_process` passes the instance. Install: npm once, then every
+    bridge device with exports is restarted, pinned to its record.
+  - `matterBridge` is **custom**, not sensor (`SupportsOnState` would steal the
+    list display from `status`, issue #56). Slot allocated in
+    `validateDeviceConfigUi`; a duplicated device's copied slot is reallocated.
+  - **Slot 0 is reserved** (`bridges.LEGACY_SLOT`): its ports are the legacy
+    bridge's defaults, so the first bridge device gets slot 1 (5650 / 5682).
+  - Stopping a bridge device's comm leaves its node RUNNING (Indigo stops every
+    device on a plugin reload); deleting the device uninstalls the node and
+    clears `bridge.<id>.*`; storage is kept.
+- Known gaps, by design for now: device bridges have no health device (their
+  own states stand in; the shared `matterBridgeHealth` stays legacy's); they
+  ignore the global "Enable Matter export" switch (absent `exportEnabled` reads
+  as on); fabric backup/restore and CT calibration act on the legacy bridge
+  only; no "on bridge X" exclusion yet, so one device CAN be on two bridges
+  (step 4); no device actions yet — pairing goes through the dialogs.
+- Next: the Mac acceptance test (create two Matter Bridge devices, export a
+  device on each, pair both to Apple Home, reload the plugin — no duplicates),
+  then step 4's exclusion and per-bridge health, then step 5.
 
 ### Working method used (sandbox and Mac)
 

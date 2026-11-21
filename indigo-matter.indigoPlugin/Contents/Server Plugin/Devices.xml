@@ -1210,4 +1210,56 @@
         <UiDisplayStateId>subscriptionHealth</UiDisplayStateId>
     </Device>
 
+    <!-- Multi-bridge (private fork, docs/MULTI-BRIDGE.md step 2b): one Matter
+         bridge per device — its own node process, ports, export list and
+         pairing. Custom rather than sensor: a sensor's SupportsOnState would
+         take the list display away from `status` (issue #56). Every state is
+         triggerable. `bridgeSlot` is allocated once by validateDeviceConfigUi
+         and never moves. -->
+    <Device id="matterBridge" type="custom">
+        <Name>Matter Bridge</Name>
+        <ConfigUI>
+            <Field id="bridgeHelp" type="label">
+                <Label>A Matter Bridge device is one Matter accessory with its own pairing code. Choose what it exports in Plugins ▸ Manage Matter Exports… (pick this bridge at the top of the dialog), then pair it from Pair Matter Bridge….</Label>
+            </Field>
+            <Field id="bridgeSlot" type="textfield" hidden="true" defaultValue="">
+                <Label>Port slot:</Label>
+            </Field>
+        </ConfigUI>
+        <States>
+            <State id="status">
+                <ValueType>String</ValueType>
+                <TriggerLabel>Bridge Status</TriggerLabel>
+                <TriggerLabelPrefix>Bridge status is</TriggerLabelPrefix>
+                <ControlPageLabel>Status</ControlPageLabel>
+            </State>
+            <State id="online">
+                <ValueType boolType="TrueFalse">Boolean</ValueType>
+                <TriggerLabel>Bridge Online</TriggerLabel>
+                <ControlPageLabel>Online</ControlPageLabel>
+            </State>
+            <State id="paired">
+                <ValueType boolType="TrueFalse">Boolean</ValueType>
+                <TriggerLabel>Bridge Paired</TriggerLabel>
+                <ControlPageLabel>Paired</ControlPageLabel>
+            </State>
+            <State id="ecosystems">
+                <ValueType>String</ValueType>
+                <TriggerLabel>Paired Ecosystems</TriggerLabel>
+                <ControlPageLabel>Ecosystems</ControlPageLabel>
+            </State>
+            <State id="endpoints">
+                <ValueType>Integer</ValueType>
+                <TriggerLabel>Exported Devices</TriggerLabel>
+                <ControlPageLabel>Exported Devices</ControlPageLabel>
+            </State>
+            <State id="bridgeVersion">
+                <ValueType>String</ValueType>
+                <TriggerLabel>Bridge Node Version</TriggerLabel>
+                <ControlPageLabel>Bridge Node Version</ControlPageLabel>
+            </State>
+        </States>
+        <UiDisplayStateId>status</UiDisplayStateId>
+    </Device>
+
 </Devices>

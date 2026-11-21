@@ -16,6 +16,7 @@ Pure Python, no ``indigo`` import, so it is unit-testable on its own.
 """
 from __future__ import annotations
 
+import functools
 from collections.abc import MutableMapping
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterator, Optional
@@ -138,3 +139,72 @@ class BridgeRuntime:
     bridge: Any = None       # export_bridge.ExportBridge
     process: Any = None      # bridge_agent.BridgeProcess (built on demand)
     exported_ids: frozenset = field(default_factory=frozenset)
+
+
+#: The slot the legacy single bridge ("Manage Matter Exports…" with no bridge
+#: device chosen) effectively occupies: its default ports ARE slot 0's (Matter
+#: 5640, protocol 5681), so no bridge DEVICE may take slot 0 until step 5
+#: retires the legacy bridge — two nodes on one port is the §7 bind failure.
+LEGACY_SLOT = 0
+
+
+def port_check_attrs(device_id: int) -> tuple:
+    """The plugin attributes holding one bridge's port-conflict check state.
+
+    Bridge 0 (the legacy bridge) keeps the upstream names, so every existing
+    test and code path that names them still means the same thing.
+    """
+    if not device_id:
+        return ("_next_bridge_port_check", "_last_bridge_port_conflict")
+    return (f"_next_bridge_port_check_{int(device_id)}", f"_last_bridge_port_conflict_{int(device_id)}")
+
+
+def bridge_states(*, export_count: int, enabled: bool, connected: bool, attached: bool,
+                  fabrics: Optional[list], version: Any,
+                  describe_fabric: Callable[[Any], str] = str) -> list:
+    """The ``matterBridge`` device's states, as an ``updateStatesOnServer`` list.
+
+    ``fabrics`` is ``None`` while nothing has been reported (shown as
+    "unknown", never as "none" — not knowing is not the same as unpaired).
+    """
+    if not export_count:
+        status = "idle"
+    elif not enabled:
+        status = "switched off"
+    elif not connected:
+        status = "not connected"
+    elif not attached:
+        status = "not serving"
+    else:
+        status = "online"
+    names = None if fabrics is None else [describe_fabric(f) for f in fabrics]
+    if names is None:
+        ecosystems = "unknown"
+    else:
+        ecosystems = ", ".join(names) or "none"
+    return [
+        {"key": "status", "value": status},
+        {"key": "online", "value": status == "online"},
+        {"key": "paired", "value": bool(names)},
+        {"key": "ecosystems", "value": ecosystems},
+        {"key": "endpoints", "value": int(export_count)},
+        {"key": "bridgeVersion", "value": str(version or "")},
+    ]
+
+
+def legacy_bridge_only(method: Callable) -> Callable:
+    """Run a plugin callback against the LEGACY bridge, whatever a dialog chose.
+
+    For callbacks that have no Bridge popup yet (fabric backup/restore, the
+    colour-temperature calibration): without the pin they would act on
+    whichever bridge the last export dialog left selected.
+    """
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        targeting = getattr(self, "_targeting", None)
+        legacy = getattr(self, "_legacy_runtime", None)
+        if targeting is None or legacy is None:
+            return method(self, *args, **kwargs)
+        with targeting(legacy()):
+            return method(self, *args, **kwargs)
+    return wrapper

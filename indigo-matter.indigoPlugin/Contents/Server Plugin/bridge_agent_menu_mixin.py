@@ -22,6 +22,7 @@ from typing import Any, Optional
 import indigo  # provided by the Indigo runtime
 
 import bridge_agent
+import bridges
 
 class BridgeAgentMenuMixin:
     """Install/reinstall/start/stop the Matter bridge node's LaunchAgent, and
@@ -51,7 +52,42 @@ class BridgeAgentMenuMixin:
     # ------------------------------------------------------------------
     # The Matter bridge node's LaunchAgent (E7 — PRD §4.2, XG5, XAC1)
     # ------------------------------------------------------------------
-    def _start_bridge_agent(self) -> None:
+    # ------------------------------------------------------------------
+    # Multi-bridge (private fork): which bridge an agent operation is for.
+    # ``runtime=None`` keeps upstream's meaning — the target bridge, i.e.
+    # ``self.bridge_process`` — so every existing caller and test is unchanged;
+    # an ExportBridge's own seams pass their record explicitly.
+    # ------------------------------------------------------------------
+    def _agent_runtime(self, runtime=None):
+        """The bridge record an agent operation is for (None outside the full plugin)."""
+        if runtime is not None:
+            return runtime
+        finder = getattr(self, "_target_runtime", None)
+        return finder() if callable(finder) else None  # pylint: disable=not-callable
+
+    def _agent_process(self, runtime=None):
+        record = self._agent_runtime(runtime)
+        return self.bridge_process if record is None else record.process
+
+    def _set_agent_process(self, runtime, agent) -> None:
+        record = self._agent_runtime(runtime)
+        if record is None:
+            self.bridge_process = agent
+        else:
+            record.process = agent
+
+    def _new_bridge_process(self, runtime=None):
+        """A ``BridgeProcess`` for that bridge: its own instance, or upstream's defaults."""
+        instance = getattr(self._agent_runtime(runtime), "instance", None)
+        if instance is None:
+            return bridge_agent.BridgeProcess(dict(self.pluginPrefs), self.logger)
+        return bridge_agent.BridgeProcess(dict(self.pluginPrefs), self.logger, instance=instance)
+
+    def _agent_err_log(self, runtime=None) -> str:
+        instance = getattr(self._agent_runtime(runtime), "instance", None)
+        return instance.err_log if instance is not None else bridge_agent.BRIDGE_ERR_LOG
+
+    def _start_bridge_agent(self, runtime=None) -> None:
         """Install (if needed) and start the bridge node's LaunchAgent.
 
         The ``agent_start`` seam. Called by :class:`export_bridge.ExportBridge`
@@ -77,9 +113,9 @@ class BridgeAgentMenuMixin:
         carries it over; it is a no-op when this call's own ``ensure_installed()``
         DID bootstrap fresh (that arming must win).
         """
-        previous = self.bridge_process
-        self.bridge_process = bridge_agent.BridgeProcess(dict(self.pluginPrefs), self.logger)
-        agent = self.bridge_process
+        previous = self._agent_process(runtime)
+        agent = self._new_bridge_process(runtime)
+        self._set_agent_process(runtime, agent)
         applied = agent.ensure_installed()
         if applied is None:
             # Preflight failed; the plist has been torn down and the reason
@@ -109,9 +145,9 @@ class BridgeAgentMenuMixin:
                 "unavailable until it does. %s",
                 "did not start" if state == agent.LOADED_NOT_RUNNING
                 else "could not be loaded by launchd",
-                self._bridge_agent_diagnosis())
+                self._bridge_agent_diagnosis(runtime))
 
-    def _stop_bridge_agent(self) -> None:
+    def _stop_bridge_agent(self, runtime=None) -> None:
         """Stop the bridge agent and REMOVE its plist. The storage is untouched.
 
         The ``agent_stop`` seam, called only once there is genuinely nothing to
@@ -140,10 +176,10 @@ class BridgeAgentMenuMixin:
         that log line is the belt; resetting the memory of the conflict here,
         so there is nothing left to compare against, is the braces.
         """
-        agent = self.bridge_process
+        agent = self._agent_process(runtime)
         if agent is None:
             return
-        self._last_bridge_port_conflict = None
+        setattr(self, bridges.port_check_attrs(getattr(self._agent_runtime(runtime), "device_id", 0))[1], None)
         was_loaded = agent.is_running()      # "is there a job on the books"
         agent.uninstall()                    # bootout + remove the plist
         if agent.is_running() or os.path.exists(agent.plist_path):
@@ -157,7 +193,8 @@ class BridgeAgentMenuMixin:
                 "retries this on its own — reload the plugin, or run 'launchctl bootout "
                 "gui/$(id -u)/%s' and delete that file by hand.",
                 "stopped" if agent.is_running() else "removed", agent.plist_path,
-                bridge_agent.LABEL)
+                getattr(getattr(self._agent_runtime(runtime), "instance", None), "label", None)
+                or bridge_agent.LABEL)
             return
         if was_loaded:
             self.logger.info(
@@ -171,7 +208,7 @@ class BridgeAgentMenuMixin:
                 "Matter bridge: nothing is exported and no bridge node LaunchAgent was loaded; "
                 "any plist has been removed. Pairings are kept.")
 
-    def _bridge_agent_diagnosis(self) -> Optional[str]:
+    def _bridge_agent_diagnosis(self, runtime=None) -> Optional[str]:
         """Why is the bridge node not answering? The ``agent_diagnose`` seam.
 
         Reads the agent's own error log, which is the only place the real cause
@@ -185,7 +222,8 @@ class BridgeAgentMenuMixin:
         every failure streak would turn a crash-loop into a crash-loop nobody can
         read the log of.
         """
-        agent = self.bridge_process
+        agent = self._agent_process(runtime)
+        err_log = self._agent_err_log(runtime)
         if agent is None:
             return ("The bridge node's LaunchAgent has not been started by this plugin session — "
                     "export at least one device, or reload the plugin.")
@@ -203,11 +241,11 @@ class BridgeAgentMenuMixin:
             # NOT "recent". The file is appended to and never truncated, so the
             # last 20 lines can be from a crash-loop days ago that has since been
             # fixed — naming the file is what lets the user check the timestamps.
-            return (f"The last lines of {os.path.join(agent.log_dir, bridge_agent.BRIDGE_ERR_LOG)} "
+            return (f"The last lines of {os.path.join(agent.log_dir, err_log)} "
                     f"(appended to since the bridge was first started, so these may be old):\n"
                     f"{tail}")
         return (f"The {bridge_agent.BRIDGE_PACKAGE} package is installed and its error log "
-                f"({os.path.join(agent.log_dir, bridge_agent.BRIDGE_ERR_LOG)}) is empty, so the "
+                f"({os.path.join(agent.log_dir, err_log)}) is empty, so the "
                 f"node is failing without saying why — check that nothing else on this Mac holds "
                 f"Matter port {agent.matter_port} or protocol port {agent.ws_port}.")
 
@@ -254,7 +292,7 @@ class BridgeAgentMenuMixin:
             "this can take a minute.",
             "Removing and reinstalling" if clean else "Installing")
         self._install_thread = threading.Thread(
-            target=self._install_bridge_node, args=(clean,),
+            target=self._install_bridge_nodes, args=(clean,),
             name="matter-bridge-install", daemon=True)
         self._install_thread.start()
         return True
@@ -279,7 +317,7 @@ class BridgeAgentMenuMixin:
             return (False, valuesDict, errors)
         # Built from CURRENT prefs rather than reused: this must work in a
         # session that never started the agent, which is the whole point of it.
-        self.bridge_process = bridge_agent.BridgeProcess(dict(self.pluginPrefs), self.logger)
+        self.bridge_process = self._new_bridge_process()
         self._stop_bridge_agent()
         if self.export_bridge is not None:
             # The plugin no longer has an agent it started, so the XAC1 latch
@@ -305,7 +343,37 @@ class BridgeAgentMenuMixin:
         if self.export_bridge is not None:
             self.export_bridge.cancel_expected_restart()
 
-    def _install_bridge_node(self, clean: bool = False) -> None:
+    def _install_bridge_nodes(self, clean: bool = False) -> None:
+        """Multi-bridge: npm-install ONCE (the legacy pass), then restart each bridge device.
+
+        One npm root serves every bridge node (MULTI-BRIDGE.md, plugin change
+        6), so the package is installed once; every bridge device that exports
+        something is then put onto the new version by the same restart logic,
+        pinned to its own record on this (background) thread.
+        """
+        targeting = getattr(self, "_targeting", None)
+        legacy = getattr(self, "_legacy_runtime", None)
+        if targeting is None or legacy is None:
+            self._install_bridge_node(clean)
+            return
+        # pylint: disable=not-callable  # both checked just above
+        with targeting(legacy()):
+            if self._install_bridge_node(clean) is False:
+                return
+        for record in list((getattr(self, "bridge_runtimes", None) or {}).values()):
+            if self._stopping:
+                return
+            if record.store is None or not len(record.store):
+                continue
+            with targeting(record):
+                self._install_bridge_node(clean, skip_install=True)
+
+    def _device_bridges_export_something(self) -> bool:
+        return any(record.store is not None and len(record.store)
+                   for record in list((getattr(self, "bridge_runtimes", None) or {}).values()))
+
+    # pylint: disable-next=inconsistent-return-statements
+    def _install_bridge_node(self, clean: bool = False, skip_install: bool = False) -> Optional[bool]:
         """npm-install the bridge package, then restart it if anything is exported.
 
         The restart is conditional on there being something to export, which is
@@ -339,22 +407,24 @@ class BridgeAgentMenuMixin:
         unclaimed_window = False
         try:
             agent = bridge_agent.BridgeProcess(dict(self.pluginPrefs), self.logger)
-            if clean and not agent.remove_package():
+            if not skip_install and clean and not agent.remove_package():
                 # remove_package has said what is still there. Installing over a
                 # wedged install is what the clean variant exists to avoid.
                 self.logger.error(
                     "Clean reinstall of the Matter bridge ABANDONED — the old package "
                     "could not be removed, so nothing was reinstalled over it.")
-                return
-            if not agent.install():
+                return False
+            if not skip_install and not agent.install():
                 self.logger.error(
                     "Install/update of the Matter bridge did not complete — see the error "
                     "above. Nothing was changed; retry when resolved.")
-                return
+                return False
             if self._stopping:  # plugin is tearing down — don't mutate its state
                 return
-            self.bridge_process = bridge_agent.BridgeProcess(dict(self.pluginPrefs), self.logger)
+            self.bridge_process = self._new_bridge_process()
             if self.exports is None or not len(self.exports):
+                if skip_install or self._device_bridges_export_something():
+                    return None  # this bridge has nothing to restart; another one does
                 self.logger.info(
                     "Matter bridge installed. It is NOT being started: nothing is exported "
                     "yet, and the bridge only runs while the export list is non-empty. Add a "

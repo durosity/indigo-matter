@@ -37,6 +37,7 @@ import indigo  # provided by the Indigo runtime
 
 from async_runtime import AsyncRuntime
 from bridge_agent_menu_mixin import BridgeAgentMenuMixin
+from bridge_device_mixin import BridgeDeviceMixin
 from commission_jobs import CommissionJobs
 import ct_bounds
 from ct_calibration import CTCalibrationEngine
@@ -44,6 +45,7 @@ import device_settings
 from device_sync import DeviceSync, NodeDeviceTombstones
 from diagnostics_menu_mixin import DiagnosticsMenuMixin, MatterUnavailable
 import bridge_health
+import bridges
 import export_bridge
 from export_bridge import ExportBridge
 import export_dialog_mixin      # noqa: F401 (tests patch EXPORT_PICKER_LIMIT)  # pylint: disable=unused-import
@@ -119,7 +121,7 @@ def _dead_verdict_cause_text(agent) -> str:
 
 class Plugin(HttpApiMixin, ExportDialogMixin, PairingMenuMixin, MatterServerMenuMixin,
              ExportRecoveryMenuMixin, BridgeAgentMenuMixin,
-             DiagnosticsMenuMixin, NodeReplaceMenuMixin, indigo.PluginBase):
+             DiagnosticsMenuMixin, NodeReplaceMenuMixin, BridgeDeviceMixin, indigo.PluginBase):
     """Matter plugin entry point."""
 
     def __init__(self, plugin_id, plugin_display_name, plugin_version, plugin_prefs, **kwargs):
@@ -148,6 +150,14 @@ class Plugin(HttpApiMixin, ExportDialogMixin, PairingMenuMixin, MatterServerMenu
         # vs the export allow-list) and must not silence each other's verdicts.
         self._next_bridge_port_check: float = 0.0
         self._last_bridge_port_conflict: str | None = None
+        # Multi-bridge (private fork, docs/MULTI-BRIDGE.md): every running
+        # Matter Bridge DEVICE's record, the bridge an open dialog has chosen,
+        # and a per-thread pin for background work. Set BEFORE the three
+        # assignments below, which go through BridgeDeviceMixin's properties.
+        self.bridge_runtimes: dict = {}
+        self._current_bridge_id: int | None = None
+        self._bridge_target = threading.local()
+        self._device_exported_ids: frozenset[int] = frozenset()
         # The EXPORT bridge node's LaunchAgent (E7). Built lazily and only ever
         # by a path that means to run it: a fresh install must be inert (XAC1),
         # and constructing this in startup would be one `ensure_installed` away
@@ -329,6 +339,9 @@ class Plugin(HttpApiMixin, ExportDialogMixin, PairingMenuMixin, MatterServerMenu
 
         # Export (outbound) — built unconditionally, started only if the
         # allow-list is non-empty. Both decisions live in _exports_changed.
+        # Multi-bridge: this is the LEGACY bridge, and its seams are bound to
+        # the legacy record rather than to whichever bridge a dialog has chosen.
+        legacy = self._legacy_runtime()
         self.export_bridge = ExportBridge(
             self.exports, self.runtime, self.logger, lambda: self.pluginPrefs,
             plugin_version=self._version, plugin_id=self._export_plugin_id(),
@@ -340,9 +353,9 @@ class Plugin(HttpApiMixin, ExportDialogMixin, PairingMenuMixin, MatterServerMenu
             # gated by the ALLOW-LIST, not by startup, so handing them over here
             # installs nothing (XAC1). ExportBridge calls them on the
             # empty↔non-empty transitions and nowhere else.
-            agent_start=self._start_bridge_agent,
-            agent_stop=self._stop_bridge_agent,
-            agent_diagnose=self._bridge_agent_diagnosis,
+            agent_start=lambda: self._start_bridge_agent(legacy),
+            agent_stop=lambda: self._stop_bridge_agent(legacy),
+            agent_diagnose=lambda: self._bridge_agent_diagnosis(legacy),
         )
         self._ct_calibration = CTCalibrationEngine(
             self.exports, self._indigo_device, self.export_bridge.ct_learner, self.logger)
@@ -432,17 +445,30 @@ class Plugin(HttpApiMixin, ExportDialogMixin, PairingMenuMixin, MatterServerMenu
     # ------------------------------------------------------------------
     # Export wiring (PRD-indigo-matter-export §5.4)
     # ------------------------------------------------------------------
-    def _exports_changed(self) -> None:
+    def _exports_changed(self, runtimes=None) -> None:
         """THE seam for "the allow-list changed" — call it after every write.
 
         Refreshes the hot-path id set, subscribes to device changes if this is
         the first export, and lets the bridge start or stop itself (XG5).
+
+        Multi-bridge: the id sets of EVERY bridge are refreshed (the fast path
+        gates on their union), but only ``runtimes`` are told to start/stop —
+        by default the target bridge, i.e. the one the dialog just edited.
         """
-        self._exported_ids = self.exports.ids() if self.exports is not None else frozenset()
+        union: set = set()
+        claimed: set = set()
+        for record in self._all_runtimes():
+            record.exported_ids = record.store.ids() if record.store is not None else frozenset()
+            union |= record.exported_ids
+            if record.device_id:
+                claimed |= record.exported_ids
+        self._exported_ids = frozenset(union)
+        self._device_exported_ids = frozenset(claimed)
         if self._exported_ids:
             self._subscribe_to_device_changes()
-        if self.export_bridge is not None:
-            self.export_bridge.exports_changed()
+        for record in ([self._target_runtime()] if runtimes is None else runtimes):
+            if record.bridge is not None:
+                record.bridge.exports_changed()
 
     def _subscribe_to_device_changes(self) -> None:
         """Ask the server for every device change — once, and only if we need it.
@@ -574,10 +600,12 @@ class Plugin(HttpApiMixin, ExportDialogMixin, PairingMenuMixin, MatterServerMenu
         self._device_updates_seen = True
         if newDev.id not in self._exported_ids:
             return
-        if self.export_bridge is None:
+        targets = [record.bridge for record in self._runtimes_exporting(newDev.id)
+                   if record.bridge is not None]
+        if not targets:
             return
         try:
-            self.export_bridge.device_updated(origDev, newDev)
+            self._forward_device_update(targets, origDev, newDev)
         except Exception as exc:  # pylint: disable=broad-except
             # never let export break Indigo's callback
             # Named and rate-limited: a bare traceback here says a device broke
@@ -598,6 +626,13 @@ class Plugin(HttpApiMixin, ExportDialogMixin, PairingMenuMixin, MatterServerMenu
         and — since issue #204/ADR-0008 — a deleted matterNode device is
         tombstoned so the next reconcile does not silently recreate it."""
         super().deviceDeleted(dev)
+        if dev.deviceTypeId == bridges.BRIDGE_DEVICE_TYPE:
+            try:
+                self._forget_bridge_device(dev)
+            except Exception as exc:  # pylint: disable=broad-except
+                # a deletion must always complete
+                self.logger.exception(exc)
+            return
         if dev.deviceTypeId == "matterNode":
             # Widened to cover pluginProps.get too (issue #204 review, fix F):
             # the noqa below claims "a deletion must always complete", which
@@ -620,40 +655,21 @@ class Plugin(HttpApiMixin, ExportDialogMixin, PairingMenuMixin, MatterServerMenu
         except Exception as exc:  # pylint: disable=broad-except
             # a deletion must always complete
             self.logger.exception(exc)
-        if dev.id not in self._exported_ids or self.exports is None:
+        if dev.id not in self._exported_ids:
             return
-        try:
-            self.exports.remove(dev.id)
-            self.logger.info("Removed Matter export for %s (id %s) — the Indigo device was deleted",
-                             getattr(dev, "name", ""), dev.id)
-        except Exception as exc:  # pylint: disable=broad-except
-            # The store rolled back, so the entry survives; the endpoint removal
-            # below is still right (the device is gone either way) and the
-            # startup sweep will report the orphan.
-            self.logger.error("Matter bridge: removing the deleted device %s from the export "
-                              "list FAILED — %s", dev.id, exc)
-            self.logger.exception(exc)
+        owners = self._runtimes_exporting(dev.id)
         self._export_callback_failed.discard(dev.id)
         try:
-            if self.export_bridge is not None:
-                # Issue #274: the device is confirmed gone — destroy the
-                # accessory outright.
-                self.export_bridge.remove(dev.id)
-        except Exception as exc:  # pylint: disable=broad-except
-            # Absorbing: anything export_bridge.remove() raises — the socket is the
-            # bridge's, not ours, so this is an expected raise path (see the finally
-            # below, which exists because of it). Safe because the deletion has already
-            # happened in Indigo and the startup sweep reports any surviving export.
-            # Pinned by test_a_raising_endpoint_removal_still_refreshes_the_cache.
-            self.logger.exception(exc)
+            for record in owners:
+                self._remove_deleted_export(record, dev)
         finally:
-            # In a finally because the endpoint removal above can raise (the
-            # socket is the bridge's, not ours) and the id-set cache has no
-            # other way back in sync: leaving a deleted device in it makes
-            # deviceUpdated hand a ghost to the bridge on every later change,
-            # and deviceDeleted will never fire for it again.
+            # In a finally because an endpoint removal can raise (the socket is
+            # the bridge's, not ours) and the id-set cache has no other way back
+            # in sync: leaving a deleted device in it makes deviceUpdated hand a
+            # ghost to the bridge on every later change, and deviceDeleted will
+            # never fire for it again.
             try:
-                self._exports_changed()
+                self._exports_changed(owners)
             except Exception as exc:  # pylint: disable=broad-except
                 # Absorbing: anything _exports_changed() raises. This one is inside the
                 # finally, which is why it must not be removed: an exception raised from a
@@ -661,6 +677,32 @@ class Plugin(HttpApiMixin, ExportDialogMixin, PairingMenuMixin, MatterServerMenu
                 # deviceDeleted callback, turning a bookkeeping failure into a broken
                 # delete. No test drives this arm (#310 audit).
                 self.logger.exception(exc)
+
+    def _remove_deleted_export(self, record, dev) -> None:
+        """One bridge's half of a deleted device: drop it from the list and the node."""
+        if record.store is not None:
+            try:
+                record.store.remove(dev.id)
+                self.logger.info("Removed Matter export for %s (id %s) — the Indigo device was deleted",
+                                 getattr(dev, "name", ""), dev.id)
+            except Exception as exc:  # pylint: disable=broad-except
+                # The store rolled back, so the entry survives; the endpoint removal
+                # below is still right (the device is gone either way) and the
+                # startup sweep will report the orphan.
+                self.logger.error("Matter bridge: removing the deleted device %s from the export "
+                                  "list FAILED — %s", dev.id, exc)
+                self.logger.exception(exc)
+        try:
+            if record.bridge is not None:
+                # Issue #274: the device is confirmed gone — destroy the
+                # accessory outright.
+                record.bridge.remove(dev.id)
+        except Exception as exc:  # pylint: disable=broad-except
+            # Absorbing: anything export_bridge.remove() raises — the socket is the
+            # bridge's, not ours. Safe because the deletion has already happened in
+            # Indigo and the startup sweep reports any surviving export. Pinned by
+            # test_a_raising_endpoint_removal_still_refreshes_the_cache.
+            self.logger.exception(exc)
 
     def shutdown(self) -> None:
         self.logger.debug("%s shutting down", PLUGIN_NAME)
@@ -685,9 +727,14 @@ class Plugin(HttpApiMixin, ExportDialogMixin, PairingMenuMixin, MatterServerMenu
         # loop still exists to close it on. The bridge *agent* is deliberately
         # left running (PRD §5.4 / PM-B) — a plugin reload must not un-pair
         # anyone's ecosystems.
-        if self.runtime is not None and self.runtime.is_running and self.export_bridge is not None:
-            self.export_bridge.stop()
-        self.export_bridge = None
+        for record in self._all_runtimes():
+            try:
+                if self.runtime is not None and self.runtime.is_running and record.bridge is not None:
+                    record.bridge.stop()
+            except Exception as exc:  # pylint: disable=broad-except
+                # one bridge's teardown must not keep the others' sockets open
+                self.logger.exception(exc)
+            record.bridge = None
         if self.runtime is not None:
             self.runtime.stop()
             self.runtime = None
@@ -905,8 +952,10 @@ class Plugin(HttpApiMixin, ExportDialogMixin, PairingMenuMixin, MatterServerMenu
         # talk to different processes and fail independently, so a shared streak
         # counter would let a healthy bridge silence a dead matter-server, or
         # the reverse.
-        if self.export_bridge is not None:
-            self.export_bridge.health_tick()
+        for record in self._all_runtimes():
+            if record.bridge is not None:
+                record.bridge.health_tick()
+        self._refresh_bridge_devices()
         self._resubscribe_tick()
         self._port_conflict_tick()
 
@@ -932,9 +981,9 @@ class Plugin(HttpApiMixin, ExportDialogMixin, PairingMenuMixin, MatterServerMenu
         """
         self._check_agent_port_conflict(
             getattr(self, "server_process", None), "_next_port_check", "_last_port_conflict")
-        self._check_agent_port_conflict(
-            getattr(self, "bridge_process", None),
-            "_next_bridge_port_check", "_last_bridge_port_conflict")
+        for record in self._all_runtimes():
+            next_attr, last_attr = bridges.port_check_attrs(record.device_id)
+            self._check_agent_port_conflict(record.process, next_attr, last_attr)
 
     def _check_agent_port_conflict(self, agent, next_attr: str, last_attr: str) -> None:
         """One LaunchAgent's contribution to :meth:`_port_conflict_tick` (#182/#187).
@@ -1067,10 +1116,11 @@ class Plugin(HttpApiMixin, ExportDialogMixin, PairingMenuMixin, MatterServerMenu
         because "why has Alexa stopped working" is answered by seeing that Alexa
         is not in this list.
         """
-        bridge = self.export_bridge
+        legacy = self._legacy_runtime()
+        bridge = legacy.bridge
         if bridge is None:
             return "Plugin still starting."
-        exported = len(self.exports) if self.exports is not None else 0
+        exported = len(legacy.store) if legacy.store is not None else 0
         if not bridge.enabled:
             return f"Export is switched off. {exported} device(s) would be exported."
         if not bridge.active:
@@ -1150,13 +1200,14 @@ class Plugin(HttpApiMixin, ExportDialogMixin, PairingMenuMixin, MatterServerMenu
         # reload, which is what PluginConfig.xml promises the user in prose. It
         # is three lines with no local symptom if they go, so it has its own test
         # (⊗ `test_saving_config_applies_the_export_switch_immediately`).
-        if self.export_bridge is None:
+        legacy_bridge = self._legacy_runtime().bridge
+        if legacy_bridge is None:
             self.logger.debug(
                 "Matter bridge: the export engine is not running, so the export switch will take "
                 "effect when the plugin next starts.")
             return
         try:
-            self.export_bridge.exports_changed()
+            legacy_bridge.exports_changed()
         except Exception as exc:  # pylint: disable=broad-except
             # A bare traceback here reads as a crash in "save settings". Say what
             # did not happen and what to do instead — the prefs ARE saved.
@@ -1195,6 +1246,8 @@ class Plugin(HttpApiMixin, ExportDialogMixin, PairingMenuMixin, MatterServerMenu
         props, see its docstring); this is the same call applied to this
         field's per-device echo of that store.
         """
+        if typeId == bridges.BRIDGE_DEVICE_TYPE:
+            return self._validate_bridge_device(valuesDict, devId)
         if typeId == "matterNode":
             valuesDict.pop("lastSurveySummary", None)
         created = ""
@@ -1719,6 +1772,9 @@ class Plugin(HttpApiMixin, ExportDialogMixin, PairingMenuMixin, MatterServerMenu
             self.logger.warning(
                 "could not refresh device %s's state list (%s) — any states added by a "
                 "plugin upgrade will be missing until this device restarts cleanly", dev.id, exc)
+        if dev.deviceTypeId == bridges.BRIDGE_DEVICE_TYPE:
+            self._start_bridge_device(dev)
+            return
         # Backstop for type edits made while the plugin was not running (the
         # validateDeviceConfigUi guard can't fire then) — issue #58.
         created = dev.pluginProps.get("createdTypeId", "")
@@ -1864,6 +1920,9 @@ class Plugin(HttpApiMixin, ExportDialogMixin, PairingMenuMixin, MatterServerMenu
             self.logger.debug("could not flag retired onTime state for %s: %s", dev.id, exc)
 
     def deviceStopComm(self, dev):  # noqa: N802
+        if dev.deviceTypeId == bridges.BRIDGE_DEVICE_TYPE:
+            self._stop_bridge_device(dev)
+            return
         self.device_sync.set_active(dev.id, False)
 
     # ------------------------------------------------------------------
@@ -1940,6 +1999,7 @@ class Plugin(HttpApiMixin, ExportDialogMixin, PairingMenuMixin, MatterServerMenu
             labels = [f"Level {i}" for i in range(3)]  # unconfirmed — generic 3-level fallback
         return [(str(i), label) for i, label in enumerate(labels)]
 
+    @bridges.legacy_bridge_only
     def getCtCalibrationScope(self, filter="", valuesDict=None, typeId="", targetId=0):  # noqa: N802, A002, ARG002
         """List-callback for the Calibrate Colour-Temperature Bounds action's
         "Sweep:" field (issue #293's calibration extension): "all" plus one
@@ -1968,6 +2028,7 @@ class Plugin(HttpApiMixin, ExportDialogMixin, PairingMenuMixin, MatterServerMenu
             self.logger.debug("getCtCalibrationScope: could not list CT exports: %s", exc)
         return options
 
+    @bridges.legacy_bridge_only
     def actionCalibrateCtBounds(self, action, dev=None, caller_waiting_for_result=None):  # noqa: N802
         """Issue #293's calibration action: parse the "Sweep:"/"Skip lamps
         that are currently on" props and hand off to

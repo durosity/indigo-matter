@@ -281,6 +281,11 @@ A Matter pairing code is not durable: once used, or once the window expires (up 
     <MenuItem id="manageMatterExports">
         <Name>Manage Matter Exports…</Name>
         <ConfigUI>
+            <Field id="bridgeTarget" type="menu">
+                <Label>Bridge:</Label>
+                <List class="self" method="getBridgeTargets" dynamicReload="true"/>
+                <CallbackMethod>bridgeTargetChanged</CallbackMethod>
+            </Field>
             <Field id="exportIntro" type="label">
                 <Label>Choose which Indigo devices are exported to Apple Home and other ecosystems as Matter accessories. Nothing is exported until you add it here. Devices this plugin created itself, and device types Matter cannot represent faithfully, are listed with the reason they cannot be exported.</Label>
             </Field>
@@ -566,6 +571,11 @@ A Matter pairing code is not durable: once used, or once the window expires (up 
         <CallbackMethod>menuPairMatterBridge</CallbackMethod>
         <ButtonTitle>Open pairing window</ButtonTitle>
         <ConfigUI>
+            <Field id="bridgeTarget" type="menu">
+                <Label>Bridge:</Label>
+                <List class="self" method="getBridgeTargets" dynamicReload="true"/>
+                <CallbackMethod>bridgeTargetChanged</CallbackMethod>
+            </Field>
             <Field id="pairIntro" type="label">
                 <Label>Opens a pairing window so an ecosystem (Apple Home, Alexa, Google, SmartThings) can add the devices Indigo exports as Matter accessories.
 
@@ -591,6 +601,11 @@ The bridge only runs while at least one device is exported, so add something in 
         <CallbackMethod>menuPairMatterVacuum</CallbackMethod>
         <ButtonTitle>Show pairing code</ButtonTitle>
         <ConfigUI>
+            <Field id="bridgeTarget" type="menu">
+                <Label>Bridge:</Label>
+                <List class="self" method="getBridgeTargets" dynamicReload="true"/>
+                <CallbackMethod>bridgeTargetChanged</CallbackMethod>
+            </Field>
             <Field id="vacuumIntro" type="label">
                 <Label>A robot vacuum is exported as its own Matter accessory, not as part of the bridge, so it has its own pairing code. The code (and a link to a QR page) is written to the Indigo EVENT LOG.
 
@@ -614,6 +629,11 @@ If the vacuum has never been paired, its original code is shown. Once paired, a 
         <Name>Unpair an Ecosystem…</Name>
         <CallbackMethod>menuUnpairEcosystem</CallbackMethod>
         <ConfigUI>
+            <Field id="bridgeTarget" type="menu">
+                <Label>Bridge:</Label>
+                <List class="self" method="getBridgeTargets" dynamicReload="true"/>
+                <CallbackMethod>bridgeTargetChanged</CallbackMethod>
+            </Field>
             <Field id="unpairWarning" type="label">
                 <Label>Removes ONE ecosystem's pairing from the Matter bridge. Every accessory Indigo exports disappears from that ecosystem, along with the names, rooms, scenes and automations you built on them there. Other ecosystems are unaffected.
 
@@ -701,6 +721,11 @@ Use this if the Matter bridge will not start after an upgrade and a plain "Insta
         <Name>Stop the Matter bridge…</Name>
         <CallbackMethod>menuStopBridgeNode</CallbackMethod>
         <ConfigUI>
+            <Field id="bridgeTarget" type="menu">
+                <Label>Bridge:</Label>
+                <List class="self" method="getBridgeTargets" dynamicReload="true"/>
+                <CallbackMethod>bridgeTargetChanged</CallbackMethod>
+            </Field>
             <Field id="warning" type="label">
                 <Label>Stops the Matter bridge process and removes its LaunchAgent, so it does not come back when this Mac restarts.
 
@@ -756,6 +781,11 @@ You normally never need this: the bridge starts and stops with your export list.
         <Name>Rebuild Matter Endpoint Map…</Name>
         <CallbackMethod>menuRebuildEndpointMap</CallbackMethod>
         <ConfigUI>
+            <Field id="bridgeTarget" type="menu">
+                <Label>Bridge:</Label>
+                <List class="self" method="getBridgeTargets" dynamicReload="true"/>
+                <CallbackMethod>bridgeTargetChanged</CallbackMethod>
+            </Field>
             <Field id="warning" type="label">
                 <Label>Use this ONLY when the plugin says the bridge node is refusing to export because its endpoint-number map is unreadable. The map is the bridge's safety record of which Matter accessory number belongs to which Indigo device; rebuilding it discards the unreadable record and adopts whatever numbers exist now as the new one.
 
@@ -803,6 +833,11 @@ If the bridge node is NOT refusing, this does nothing useful and is refused: the
         <Name>Migrate an exported accessory…</Name>
         <CallbackMethod>menuMigrateExport</CallbackMethod>
         <ConfigUI>
+            <Field id="bridgeTarget" type="menu">
+                <Label>Bridge:</Label>
+                <List class="self" method="getBridgeTargets" dynamicReload="true"/>
+                <CallbackMethod>bridgeTargetChanged</CallbackMethod>
+            </Field>
             <Field id="migrateIntro" type="label">
                 <Label>Moves a live exported accessory to a different Indigo device — for replaced hardware, a module moved to new gear, or a device rebuilt under a new id. Nothing is removed and nothing is re-paired: Apple Home and every other paired ecosystem keep the accessory's room, name, scenes and automations, because from their side nothing happened. The old device stays in Indigo, no longer exported.
 
@@ -844,6 +879,11 @@ A ROLE CHANGE is not what this is for — export the replacement device normally
         <Name>Reset Matter Bridge Pairings…</Name>
         <CallbackMethod>menuResetBridgePairings</CallbackMethod>
         <ConfigUI>
+            <Field id="bridgeTarget" type="menu">
+                <Label>Bridge:</Label>
+                <List class="self" method="getBridgeTargets" dynamicReload="true"/>
+                <CallbackMethod>bridgeTargetChanged</CallbackMethod>
+            </Field>
             <Field id="warning" type="label">
                 <Label>Removes EVERY ecosystem pairing from the Matter bridge and starts advertising for commissioning again. Apple Home, Alexa, Google and anything else you have paired will lose all of the accessories Indigo exports, and you will have to pair the bridge again from scratch.
 

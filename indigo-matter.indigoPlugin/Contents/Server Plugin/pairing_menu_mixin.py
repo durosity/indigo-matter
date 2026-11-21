@@ -12,6 +12,7 @@ import indigo  # provided by the Indigo runtime
 
 import bridge_agent
 import bridge_protocol
+import bridges
 import bridge_health          # bridge_health.describe_fabric
 import fabric_backup
 from plugin_constants import (
@@ -235,14 +236,14 @@ class PairingMenuMixin:
             "Matter export — robot vacuum (device %s): %s%s\n"
             "    Manual pairing code: %s\n"
             "    QR payload: %s\n"
-            "    QR code page: %s?device=%s\n"
+            "    QR code page: %s%sdevice=%s\n"
             "The vacuum is its OWN Matter accessory, not part of the bridge: add it in your "
             "ecosystem's app as a separate accessory with THIS code (pairing the bridge does not "
             "add it). Expect an 'uncertified accessory' warning; choose Add Anyway.\n"
             "SECURITY: while this window is open, anyone who can read this code can add the vacuum "
             "to THEIR Apple Home, Alexa or Google account. Do not share it.",
             device_id, opening, when, manual or "(none)", qr or "(none)",
-            self._pairing_page_url(), device_id)
+            self._pairing_page_url(), "&" if "?" in self._pairing_page_url() else "?", device_id)
 
     @staticmethod
     def _window_duration(values_dict, errors) -> Optional[int]:
@@ -299,7 +300,13 @@ class PairingMenuMixin:
         tests name it directly, and ``self._iws_page_url("pairing")`` reads
         one layer further from what those call sites actually mean.
         """
-        return self._iws_page_url("pairing")  # pylint: disable=no-member  # HttpApiMixin
+        url = self._iws_page_url("pairing")  # pylint: disable=no-member  # HttpApiMixin
+        # Multi-bridge: a bridge DEVICE's page is the same page, told which bridge.
+        finder = getattr(self, "_target_runtime", None)
+        record = finder() if callable(finder) else None  # pylint: disable=not-callable
+        if record is not None and getattr(record, "device_id", 0):
+            url = f"{url}?bridge={record.device_id}"
+        return url
 
     @degrades_to_list_error
     def getBridgeFabrics(self, filter="", valuesDict=None, typeId="", targetId=0):  # noqa: N802, A002
@@ -515,6 +522,7 @@ class PairingMenuMixin:
             size /= 1024.0
         return f"{size:.1f} TB"
 
+    @bridges.legacy_bridge_only
     def menuExportFabricBackup(self):  # noqa: N802
         # menuItem has no ConfigUI/valuesDict, so outcome can only surface via the
         # log — make both success and failure unmistakable there. create_backup
@@ -550,6 +558,7 @@ class PairingMenuMixin:
             self.logger.exception(exc)
 
     @degrades_to_list_error
+    @bridges.legacy_bridge_only
     def getFabricBackups(self, filter="", valuesDict=None, typeId="", targetId=0):  # noqa: N802, A002
         """List-callback populating the restore picker (newest first).
 
@@ -571,6 +580,7 @@ class PairingMenuMixin:
             options.append((entry["path"], label))
         return options
 
+    @bridges.legacy_bridge_only
     def menuRestoreFabricBackup(self, valuesDict, menuId=""):  # noqa: N802, ARG002
         errors = indigo.Dict()
         # Restore must stop/start matter-server, which the plugin can only do in

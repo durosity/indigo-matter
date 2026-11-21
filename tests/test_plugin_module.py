@@ -276,7 +276,7 @@ def test_every_endpoint_device_type_has_a_role_label():
     import device_sync
     root = ET.parse(SERVER_PLUGIN / "Devices.xml").getroot()
     declared = ({dev.get("id") for dev in root.findall("Device")}
-                - {"matterNode", "matterBridgeHealth"})
+                - {"matterNode", "matterBridgeHealth", "matterBridge"})  # fork: outbound too
     missing = sorted(declared - set(device_sync._ROLE_LABELS))
     assert not missing, f"device types with no role suffix in _ROLE_LABELS: {missing}"
 

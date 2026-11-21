@@ -92,6 +92,7 @@ accessory. One bridge, one pairing, however many devices.
   its own action group, and a room selection is written to an Indigo variable for your
   Start action group to pass to the vacuum plugin.
   Field-validated on a Roomba for start/stop/dock; rooms not yet.
+  Setup: [docs/VACUUM.md](docs/VACUUM.md).
 - **Expect an "uncertified accessory" prompt** and choose *Add Anyway*. The bridge presents
   a development attestation certificate — as Homebridge, matterbridge and Home Assistant's
   bridge all do — and outbound attestation is the commissioning ecosystem's policy, not

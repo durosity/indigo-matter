@@ -147,9 +147,12 @@ Done (each commit tested in full before landing; suite about 4650 passing):
   Bridge popup) remain for the legacy bridge until step 5. NB the panel's
   fields now exist twice (MenuItems.xml and Devices.xml): change them in
   MenuItems.xml and regenerate, or retire the menu item in step 5.
-- Known gaps, by design for now: device bridges have no health device (their
-  own states stand in; the shared `matterBridgeHealth` stays legacy's); they
-  ignore the global "Enable Matter export" switch (absent `exportEnabled` reads
+- step 2d — health on every bridge (`step2d.py`): `matterBridge` declares
+  `matterBridgeHealth`'s twelve states too (`subscriptionHealth`,
+  `churnDetail`, `fabric1..5Name/Health`, copied from its XML), and each bridge
+  device's health reporter writes them to the bridge device itself. The
+  standing `matterBridgeHealth` device stays the legacy bridge's.
+- Known gaps, by design for now: device bridges ignore the global "Enable Matter export" switch (absent `exportEnabled` reads
   as on); fabric backup/restore and CT calibration act on the legacy bridge
   only; no "on bridge X" exclusion yet, so one device CAN be on two bridges
   (step 4); no device actions yet — pairing goes through the dialogs.

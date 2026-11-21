@@ -1532,6 +1532,77 @@
                 <TriggerLabel>Bridge Node Version</TriggerLabel>
                 <ControlPageLabel>Bridge Node Version</ControlPageLabel>
             </State>
+            <State id="subscriptionHealth">
+                <ValueType>String</ValueType>
+                <TriggerLabel>Controller Subscription Health</TriggerLabel>
+                <TriggerLabelPrefix>Controller subscription health is</TriggerLabelPrefix>
+                <ControlPageLabel>Subscription Health</ControlPageLabel>
+            </State>
+            <State id="churnDetail">
+                <ValueType>String</ValueType>
+                <TriggerLabel>Subscription Churn Detail</TriggerLabel>
+                <ControlPageLabel>Churn Detail</ControlPageLabel>
+            </State>
+            <!-- Slot 1 -->
+            <State id="fabric1Name">
+                <ValueType>String</ValueType>
+                <TriggerLabel>Fabric Slot 1 Name</TriggerLabel>
+                <ControlPageLabel>Fabric 1</ControlPageLabel>
+            </State>
+            <State id="fabric1Health">
+                <ValueType>String</ValueType>
+                <TriggerLabel>Fabric Slot 1 Health</TriggerLabel>
+                <TriggerLabelPrefix>Fabric slot 1 health is</TriggerLabelPrefix>
+                <ControlPageLabel>Fabric 1 Health</ControlPageLabel>
+            </State>
+            <!-- Slot 2 -->
+            <State id="fabric2Name">
+                <ValueType>String</ValueType>
+                <TriggerLabel>Fabric Slot 2 Name</TriggerLabel>
+                <ControlPageLabel>Fabric 2</ControlPageLabel>
+            </State>
+            <State id="fabric2Health">
+                <ValueType>String</ValueType>
+                <TriggerLabel>Fabric Slot 2 Health</TriggerLabel>
+                <TriggerLabelPrefix>Fabric slot 2 health is</TriggerLabelPrefix>
+                <ControlPageLabel>Fabric 2 Health</ControlPageLabel>
+            </State>
+            <!-- Slot 3 -->
+            <State id="fabric3Name">
+                <ValueType>String</ValueType>
+                <TriggerLabel>Fabric Slot 3 Name</TriggerLabel>
+                <ControlPageLabel>Fabric 3</ControlPageLabel>
+            </State>
+            <State id="fabric3Health">
+                <ValueType>String</ValueType>
+                <TriggerLabel>Fabric Slot 3 Health</TriggerLabel>
+                <TriggerLabelPrefix>Fabric slot 3 health is</TriggerLabelPrefix>
+                <ControlPageLabel>Fabric 3 Health</ControlPageLabel>
+            </State>
+            <!-- Slot 4 -->
+            <State id="fabric4Name">
+                <ValueType>String</ValueType>
+                <TriggerLabel>Fabric Slot 4 Name</TriggerLabel>
+                <ControlPageLabel>Fabric 4</ControlPageLabel>
+            </State>
+            <State id="fabric4Health">
+                <ValueType>String</ValueType>
+                <TriggerLabel>Fabric Slot 4 Health</TriggerLabel>
+                <TriggerLabelPrefix>Fabric slot 4 health is</TriggerLabelPrefix>
+                <ControlPageLabel>Fabric 4 Health</ControlPageLabel>
+            </State>
+            <!-- Slot 5 -->
+            <State id="fabric5Name">
+                <ValueType>String</ValueType>
+                <TriggerLabel>Fabric Slot 5 Name</TriggerLabel>
+                <ControlPageLabel>Fabric 5</ControlPageLabel>
+            </State>
+            <State id="fabric5Health">
+                <ValueType>String</ValueType>
+                <TriggerLabel>Fabric Slot 5 Health</TriggerLabel>
+                <TriggerLabelPrefix>Fabric slot 5 health is</TriggerLabelPrefix>
+                <ControlPageLabel>Fabric 5 Health</ControlPageLabel>
+            </State>
         </States>
         <UiDisplayStateId>status</UiDisplayStateId>
     </Device>

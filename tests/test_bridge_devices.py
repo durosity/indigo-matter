@@ -344,9 +344,28 @@ def test_the_bridge_device_type_is_declared_with_its_states():
     dev = root.find("./Device[@id='matterBridge']")
     assert dev is not None
     assert dev.find("UiDisplayStateId").text == "status"
-    assert {s.get("id") for s in dev.find("States")} == {
+    assert {s.get("id") for s in dev.find("States")} >= {
         "status", "online", "paired", "ecosystems", "endpoints", "bridgeVersion"}
     assert dev.find("ConfigUI/Field[@id='bridgeSlot']").get("hidden") == "true"
+
+
+def test_every_bridge_device_carries_the_health_devices_states():
+    root = ET.parse(SERVER_PLUGIN / "Devices.xml").getroot()
+    health = {s.get("id") for s in root.find("./Device[@id='matterBridgeHealth']/States")}
+    bridge = {s.get("id") for s in root.find("./Device[@id='matterBridge']/States")}
+    assert len(health) == 12 and health <= bridge
+    assert root.find("./Device[@id='matterBridge']/UiDisplayStateId").text == "status"
+
+
+def test_a_bridge_devices_health_is_written_to_the_bridge_device(plug, devices):
+    dev = _start(plug, devices)
+    health = plug.bridge_runtimes[500].bridge._health
+    assert health._health_device_finder() is dev
+    assert health._health_device_factory() is dev, "never creates a second device"
+    devices.drop(500)
+    assert health._health_device_finder() is None
+    with pytest.raises(RuntimeError):
+        health._health_device_factory()
 
 
 def test_the_bridge_device_dialog_is_the_whole_export_panel_plus_pairing():

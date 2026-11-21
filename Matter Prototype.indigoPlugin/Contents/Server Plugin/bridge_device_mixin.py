@@ -31,15 +31,12 @@ from export_bridge import ExportBridge
 from export_store import ExportStore
 
 
-def _no_health_device():
-    """Health-device factory for bridge DEVICES: there is no per-bridge one yet.
-
-    The standing ``matterBridgeHealth`` device belongs to the legacy bridge;
-    two bridges writing it would overwrite each other's verdicts. A bridge
-    device's own states carry its status instead (step 4 may add more).
-    """
-    raise RuntimeError("bridge devices do not have a health device yet — the Matter Bridge "
-                       "device's own states show this bridge's status")
+def _bridge_device_or_none(device_id: int):
+    """The Indigo device of a bridge, or None if it has gone (deleted mid-tick)."""
+    try:
+        return indigo.devices[device_id]
+    except (KeyError, IndexError, LookupError):
+        return None
 
 
 class BridgeDeviceMixin:
@@ -308,10 +305,22 @@ class BridgeDeviceMixin:
             agent_start=lambda: self._start_bridge_agent(record),  # pylint: disable=no-member
             agent_stop=lambda: self._stop_bridge_agent(record),  # pylint: disable=no-member
             agent_diagnose=lambda: self._bridge_agent_diagnosis(record),  # pylint: disable=no-member
-            health_device_finder=lambda: None,
-            health_device_factory=_no_health_device,
+            # Its controller-health states live on the bridge device itself
+            # (Devices.xml declares matterBridgeHealth's twelve on matterBridge),
+            # so each bridge reports its own ecosystems; the standing
+            # matterBridgeHealth device stays the legacy bridge's.
+            health_device_finder=lambda: _bridge_device_or_none(record.device_id),
+            health_device_factory=lambda: self._bridge_health_device_required(record.device_id),
         )
         return record
+
+    @staticmethod
+    def _bridge_health_device_required(device_id: int):
+        """Health "factory" for a bridge device: never creates — the device IS the health device."""
+        device = _bridge_device_or_none(device_id)
+        if device is None:
+            raise RuntimeError(f"the Matter Bridge device (id {device_id}) no longer exists")
+        return device
 
     def _start_bridge_device(self, dev, slot=None) -> None:
         """``deviceStartComm`` for a bridge device: build its runtime and let it start itself.

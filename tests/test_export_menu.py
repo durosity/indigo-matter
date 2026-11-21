@@ -47,7 +47,7 @@ from fakes import (
 
 MENU_ITEMS_XML = (
     Path(__file__).parent.parent
-    / "indigo-matter.indigoPlugin" / "Contents" / "Server Plugin" / "MenuItems.xml"
+    / "Matter Prototype.indigoPlugin" / "Contents" / "Server Plugin" / "MenuItems.xml"
 )
 OURS = export_catalog.DEFAULT_PLUGIN_ID
 

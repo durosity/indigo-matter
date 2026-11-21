@@ -30,7 +30,7 @@ from unittest.mock import Mock
 
 import pytest
 
-SERVER_PLUGIN = (Path(__file__).parent.parent / "indigo-matter.indigoPlugin"
+SERVER_PLUGIN = (Path(__file__).parent.parent / "Matter Prototype.indigoPlugin"
                  / "Contents" / "Server Plugin")
 MENU_ITEMS_XML = SERVER_PLUGIN / "MenuItems.xml"
 

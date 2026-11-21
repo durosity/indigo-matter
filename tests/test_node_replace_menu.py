@@ -35,7 +35,7 @@ from test_device_sync_replace import (  # noqa: F401
     NEW_NODE, OLD_NODE, OLD_NODE_NAME, OLD_RELAY_NAME, _build_coffee, _coffee_raw, _wrap_delete,
 )
 
-SERVER_PLUGIN = (Path(__file__).parent.parent / "indigo-matter.indigoPlugin"
+SERVER_PLUGIN = (Path(__file__).parent.parent / "Matter Prototype.indigoPlugin"
                  / "Contents" / "Server Plugin")
 
 NO_DEPENDENCIES = {"actionGroups": [], "controlPages": [], "devices": [],

@@ -103,7 +103,7 @@ changes is only what happens to the **state** that setting left behind.
 * Good, because a trigger built on `onTime` before it was retired stays bound
   to what its author actually built, rather than silently repointing at a
   different state the next time someone opens it.
-* Good, because `_announce_retired_on_time_state`'s notice ([`plugin.py`](../../indigo-matter.indigoPlugin/Contents/Server%20Plugin/plugin.py),
+* Good, because `_announce_retired_on_time_state`'s notice ([`plugin.py`](../../Matter%20Prototype.indigoPlugin/Contents/Server%20Plugin/plugin.py),
   #197) no longer has to warn about a broken binding that no longer exists —
   it only has to say the setting is gone from the dialog and where the state
   now stands.

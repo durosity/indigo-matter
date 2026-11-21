@@ -18,7 +18,7 @@ from PIL import Image
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
-OUT = os.path.join(REPO, "indigo-matter.indigoPlugin", "Contents", "Resources", "icon.png")
+OUT = os.path.join(REPO, "Matter Prototype.indigoPlugin", "Contents", "Resources", "icon.png")
 # A second copy outside the bundle, so the icon can be grabbed without digging into
 # the .indigoPlugin (the Plugin Store upload form takes a PNG directly). Written by
 # the same run as OUT so the two can never drift.

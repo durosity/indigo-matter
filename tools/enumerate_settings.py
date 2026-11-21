@@ -113,7 +113,7 @@ from pathlib import Path
 # Clusters this plugin has an inbound handler for, parsed from the handler
 # sources rather than imported: importing them drags in `protocol` and the
 # handler registry, and this script must run without the plugin's environment.
-HANDLER_DIR = (Path(__file__).parent.parent / "indigo-matter.indigoPlugin"
+HANDLER_DIR = (Path(__file__).parent.parent / "Matter Prototype.indigoPlugin"
                / "Contents" / "Server Plugin" / "matter_handlers")
 
 #: Attribute props we care about, as they appear in the generated JS.

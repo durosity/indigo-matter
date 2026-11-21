@@ -27,7 +27,7 @@ import protocol
 from fakes import COMMISSIONING_WINDOW_RESULT
 from ws_json_client import LateResponse
 
-SERVER_PLUGIN = (Path(__file__).parent.parent / "indigo-matter.indigoPlugin"
+SERVER_PLUGIN = (Path(__file__).parent.parent / "Matter Prototype.indigoPlugin"
                  / "Contents" / "Server Plugin")
 
 NODE_ID = 0x34  # 52 decimal

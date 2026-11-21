@@ -19,7 +19,7 @@ import pytest
 
 SERVER_PLUGIN_DIR = (
     Path(__file__).parent.parent
-    / "indigo-matter.indigoPlugin"
+    / "Matter Prototype.indigoPlugin"
     / "Contents"
     / "Server Plugin"
 )

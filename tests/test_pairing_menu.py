@@ -39,7 +39,7 @@ from export_store import ExportEntry, ExportStore
 from fakes import FakeIndigoDevices, RelayDevice
 
 SERVER_PLUGIN = (Path(__file__).parent.parent
-                 / "indigo-matter.indigoPlugin" / "Contents" / "Server Plugin")
+                 / "Matter Prototype.indigoPlugin" / "Contents" / "Server Plugin")
 MENU_ITEMS_XML = SERVER_PLUGIN / "MenuItems.xml"
 PLUGIN_CONFIG_XML = SERVER_PLUGIN / "PluginConfig.xml"
 ACTIONS_XML = SERVER_PLUGIN / "Actions.xml"

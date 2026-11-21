@@ -774,7 +774,7 @@ def test_every_setting_key_is_a_real_state_id_on_its_device_types():
     from pathlib import Path
     from matter_handlers.settings import SETTINGS
     xml = Path(__file__).resolve().parents[1].joinpath(
-        "indigo-matter.indigoPlugin/Contents/Server Plugin/Devices.xml").read_text()
+        "Matter Prototype.indigoPlugin/Contents/Server Plugin/Devices.xml").read_text()
     for setting in SETTINGS:
         for device_type in setting.device_types:
             block = re.search(rf'<Device id="{device_type}".*?</Device>', xml, re.S)

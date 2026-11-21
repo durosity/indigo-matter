@@ -16,7 +16,7 @@ import device_settings
 
 BUNDLE = (
     Path(__file__).parent.parent
-    / "indigo-matter.indigoPlugin"
+    / "Matter Prototype.indigoPlugin"
     / "Contents"
 )
 SERVER_PLUGIN = BUNDLE / "Server Plugin"

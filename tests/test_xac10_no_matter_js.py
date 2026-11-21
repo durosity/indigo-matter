@@ -26,7 +26,7 @@ import pytest
 
 SERVER_PLUGIN_DIR = (
     Path(__file__).parent.parent
-    / "indigo-matter.indigoPlugin" / "Contents" / "Server Plugin"
+    / "Matter Prototype.indigoPlugin" / "Contents" / "Server Plugin"
 )
 
 #: Top-level module names that would mean a matter.js package. `matter` itself
@@ -97,7 +97,7 @@ def test_our_own_matter_prefixed_modules_are_not_flagged():
 
 
 #: The bundle the release workflow zips and a user double-click-installs.
-PLUGIN_BUNDLE = Path(__file__).parent.parent / "indigo-matter.indigoPlugin"
+PLUGIN_BUNDLE = Path(__file__).parent.parent / "Matter Prototype.indigoPlugin"
 
 #: What a JavaScript/TypeScript source or bundle looks like on disk. Node's own
 #: extensions plus the source-map and declaration files that would come with a
@@ -126,7 +126,7 @@ def test_no_javascript_ships_inside_the_plugin_bundle():
         if path.is_file() and path.suffix.lower() in JS_SUFFIXES
     )
     assert offenders == [], (
-        "these JavaScript/TypeScript files ship inside indigo-matter.indigoPlugin: "
+        "these JavaScript/TypeScript files ship inside Matter Prototype.indigoPlugin: "
         f"{offenders}. The bridge node is an npm package (bridge_agent.DEFAULT_INSTALL_SPEC), "
         "not bundle content — see ADR-0006 and PRD-indigo-matter-export §8 (XAC10/XG6)."
     )

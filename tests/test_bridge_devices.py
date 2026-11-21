@@ -20,7 +20,7 @@ from export_store import ExportEntry, ExportStore
 from fakes import FakeIndigoDevices, RelayDevice
 
 OURS = export_catalog.DEFAULT_PLUGIN_ID
-SERVER_PLUGIN = Path(__file__).resolve().parent.parent / "indigo-matter.indigoPlugin" / "Contents" / "Server Plugin"
+SERVER_PLUGIN = Path(__file__).resolve().parent.parent / "Matter Prototype.indigoPlugin" / "Contents" / "Server Plugin"
 
 
 class _FakeRuntime:

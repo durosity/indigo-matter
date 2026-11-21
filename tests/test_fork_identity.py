@@ -11,7 +11,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-PLUGIN = Path(__file__).resolve().parents[1] / "indigo-matter.indigoPlugin" / "Contents"
+PLUGIN = Path(__file__).resolve().parents[1] / "Matter Prototype.indigoPlugin" / "Contents"
 SERVER = PLUGIN / "Server Plugin"
 
 PROBE = """

@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).parent.parent
-SERVER_PLUGIN_DIR = REPO_ROOT / "indigo-matter.indigoPlugin" / "Contents" / "Server Plugin"
+SERVER_PLUGIN_DIR = REPO_ROOT / "Matter Prototype.indigoPlugin" / "Contents" / "Server Plugin"
 sys.path.insert(0, str(SERVER_PLUGIN_DIR))
 
 from thread_mesh import build_mesh, parse_node_diag  # noqa: E402  pylint: disable=wrong-import-position

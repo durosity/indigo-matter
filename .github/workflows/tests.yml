@@ -77,7 +77,7 @@ jobs:
       # (the module exists only inside the Indigo runtime); it is why the gate
       # is a score rather than "zero messages".
       - name: Run pylint
-        run: python -m pylint "indigo-matter.indigoPlugin/Contents/Server Plugin"
+        run: python -m pylint "Matter Prototype.indigoPlugin/Contents/Server Plugin"
 
   bridge-node:
     name: bridge-node (TypeScript)

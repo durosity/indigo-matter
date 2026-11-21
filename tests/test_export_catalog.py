@@ -322,7 +322,7 @@ def test_xac6_guard_follows_the_supplied_plugin_id_not_a_constant():
 @pytest.mark.skip(reason="fork: Info.plist carries the fork id — pinned by test_fork_identity.py")
 def test_xac6_default_plugin_id_matches_the_bundle_identifier():
     """The fallback constant must never drift from Info.plist."""
-    plist = (Path(__file__).parent.parent / "indigo-matter.indigoPlugin"
+    plist = (Path(__file__).parent.parent / "Matter Prototype.indigoPlugin"
              / "Contents" / "Info.plist")
     with plist.open("rb") as handle:
         assert plistlib.load(handle)["CFBundleIdentifier"] == export_catalog.DEFAULT_PLUGIN_ID

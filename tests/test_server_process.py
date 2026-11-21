@@ -1716,7 +1716,7 @@ def test_menu_constants_match_menuitems_xml():
     from pathlib import Path
     from server_process import BACKUP_MENU, INSTALL_MENU
 
-    root = ET.parse(Path(__file__).parent.parent / "indigo-matter.indigoPlugin" / "Contents"
+    root = ET.parse(Path(__file__).parent.parent / "Matter Prototype.indigoPlugin" / "Contents"
                     / "Server Plugin" / "MenuItems.xml").getroot()
     names = {item.get("id"): item.findtext("Name") for item in root.findall("MenuItem")}
     assert names["exportFabricBackup"] == BACKUP_MENU

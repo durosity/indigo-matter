@@ -279,7 +279,7 @@ def _menu_names() -> set:
     import xml.etree.ElementTree as ET
     from pathlib import Path
 
-    root = ET.parse(Path(__file__).parent.parent / "indigo-matter.indigoPlugin"
+    root = ET.parse(Path(__file__).parent.parent / "Matter Prototype.indigoPlugin"
                     / "Contents" / "Server Plugin" / "MenuItems.xml").getroot()
     return {item.findtext("Name") for item in root.findall("MenuItem")}
 

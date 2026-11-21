@@ -1044,7 +1044,7 @@ def _handler_write_targets() -> set:
     import re
     from pathlib import Path
 
-    handler_dir = (Path(__file__).parent.parent / "indigo-matter.indigoPlugin"
+    handler_dir = (Path(__file__).parent.parent / "Matter Prototype.indigoPlugin"
                    / "Contents" / "Server Plugin" / "matter_handlers")
     call = re.compile(r"MatterWrite\(\s*[^,]+,\s*[^,]+,\s*([\w.]+)\s*,\s*([\w.]+)\s*,", re.S)
     targets = set()

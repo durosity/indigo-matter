@@ -1,6 +1,6 @@
 # Branding
 
-Sources for the Plugin Store icon (`indigo-matter.indigoPlugin/Contents/Resources/icon.png`).
+Sources for the Plugin Store icon (`Matter Prototype.indigoPlugin/Contents/Resources/icon.png`).
 
 ## What the icon is
 
@@ -16,7 +16,7 @@ An Indigo-purple house — the platform — framing the **Matter** symbol: Matte
 | `icon.png` | **the icon, outside the bundle** — grab it from here for the Plugin Store upload form rather than digging into the `.indigoPlugin` |
 
 `build-icon.py` writes `icon.png` here *and* the real one at
-`indigo-matter.indigoPlugin/Contents/Resources/icon.png` in the same run, so the two
+`Matter Prototype.indigoPlugin/Contents/Resources/icon.png` in the same run, so the two
 cannot drift. The bundle copy is the one Indigo actually reads.
 
 Rebuild after changing either source:

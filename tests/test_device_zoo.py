@@ -30,7 +30,7 @@ from matter_model import parse_node
 
 DEVICES_XML = (
     Path(__file__).parent.parent
-    / "indigo-matter.indigoPlugin" / "Contents" / "Server Plugin" / "Devices.xml"
+    / "Matter Prototype.indigoPlugin" / "Contents" / "Server Plugin" / "Devices.xml"
 )
 _DEVICE_ELEMENTS = ET.parse(DEVICES_XML).findall("Device")
 XML_TYPE_BY_ID = {d.get("id"): d.get("type") for d in _DEVICE_ELEMENTS}

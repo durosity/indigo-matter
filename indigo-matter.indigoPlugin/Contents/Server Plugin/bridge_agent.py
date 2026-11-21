@@ -52,7 +52,7 @@ from server_process import LABEL as CONTROLLER_LABEL
 #: launchd job label. A SUFFIX of the controller's, never the same string:
 #: the label is the plist filename stem and launchd's job identity, so sharing
 #: one would have each agent bootout the other on every reload.
-LABEL = "com.simons-plugins.indigo-matter.bridge"
+from fork_identity import BRIDGE_LABEL as LABEL  # fork: was com.simons-plugins.indigo-matter.bridge
 
 #: The npm package name. Matched in ``ps`` output when reaping orphans and used
 #: as the directory under ``node_modules`` holding the entry point.
@@ -85,7 +85,7 @@ BRIDGE_INSTALL_MENU = "Install/update the Matter bridge"
 #: one matter.js's ECOSYSTEMS.md records as Alexa's hard requirement; the pref is
 #: the escape hatch when another Matter stack on the same Mac already holds it.
 PREF_MATTER_PORT = "bridgeMatterPort"
-DEFAULT_MATTER_PORT = "5540"
+from fork_identity import MATTER_PORT as DEFAULT_MATTER_PORT  # fork: was "5540"
 
 #: Reused from the controller rather than given its own pref: matter.js's mDNS
 #: stack defaults to every interface and breaks on Macs with VPN/utun interfaces,

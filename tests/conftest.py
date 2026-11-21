@@ -7,6 +7,9 @@ runtime is mocked via ``mock_indigo_base``.
 """
 from __future__ import annotations
 
+import os as _os
+_os.environ["INDIGO_MATTER_UPSTREAM_IDENTITY"] = "1"  # fork: run the upstream suite under upstream identity (see fork_identity.py)
+
 import json
 import sys
 from pathlib import Path

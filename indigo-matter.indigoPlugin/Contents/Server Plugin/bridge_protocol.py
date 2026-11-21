@@ -32,7 +32,7 @@ from typing import Any, Optional
 PROTOCOL_VERSION = 2
 
 #: Loopback WS port the bridge node listens on (§ header); pref-configurable.
-DEFAULT_WS_PORT = "5581"
+from fork_identity import WS_PORT as DEFAULT_WS_PORT  # fork: was "5581"
 PREF_WS_PORT = "bridgeWsPort"
 
 # --------------------------------------------------------------------------

@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import functools
 
-PLUGIN_NAME = "indigo-matter"
+from fork_identity import PLUGIN_NAME  # fork: was "indigo-matter"
 COMMAND_TIMEOUT = 5.0
 DECOMMISSION_TIMEOUT = 15.0
 

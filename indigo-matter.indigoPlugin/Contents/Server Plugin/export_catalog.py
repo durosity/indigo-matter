@@ -52,7 +52,7 @@ _PLUGIN_LOG = logging.getLogger("Plugin")
 #: This plugin's bundle id (``Info.plist`` ``CFBundleIdentifier``). Only a
 #: fallback: callers pass ``self.pluginId`` so the guard follows the running
 #: plugin rather than a constant that could drift from the bundle.
-DEFAULT_PLUGIN_ID = "com.simons-plugins.indigo-matter"
+from fork_identity import PLUGIN_ID as DEFAULT_PLUGIN_ID, FOREIGN_MATTER_PLUGIN_IDS  # fork
 
 # --------------------------------------------------------------------------
 # Roles (BRIDGE_PROTOCOL §4.2)
@@ -526,7 +526,7 @@ def classify(dev, plugin_id: str = DEFAULT_PLUGIN_ID, options: Optional[dict] = 
     read we cannot prove the loop guard passed, so the fail-safe answer is no.
     """
     try:
-        if _plugin_id_of(dev) == plugin_id:
+        if _plugin_id_of(dev) == plugin_id or _plugin_id_of(dev) in FOREIGN_MATTER_PLUGIN_IDS:  # fork
             return Excluded(REASON_LOOP_GUARD)
         handler = _BY_KIND.get(device_kind(dev))
         verdict = _custom(dev, options) if handler is None else handler(dev, options)

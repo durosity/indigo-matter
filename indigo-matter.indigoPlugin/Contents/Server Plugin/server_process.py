@@ -38,7 +38,7 @@ from typing import Any, Callable, Optional
 
 from launch_agent import AgentSpec, LaunchAgent, expand_home
 
-LABEL = "com.simons-plugins.indigo-matter"
+from fork_identity import CONTROLLER_LABEL as LABEL  # fork: was com.simons-plugins.indigo-matter
 MATTER_SERVER_PACKAGE = "matter-server"
 # Version installed by install(). Pinned (exact, not caret) for reproducibility — the
 # package is fast-moving pre-1.0-style Alpha/Beta. Kept in one place so a version bump

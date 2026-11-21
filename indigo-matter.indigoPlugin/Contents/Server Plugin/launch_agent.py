@@ -33,6 +33,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+
+import fork_identity
 import plistlib
 import re
 import shutil
@@ -49,7 +51,7 @@ from node_resolver import (  # pylint: disable=unused-import
     INSTALL_NODE_STAMP, MIN_NODE_VERSION, NodeResolver, _parse_node_version, expand_home,
 )
 
-DEFAULT_PROJECT_DIRNAME = "indigo-matter"   # ~/indigo-matter (npm install location)
+from fork_identity import PROJECT_DIRNAME as DEFAULT_PROJECT_DIRNAME  # fork: was ~/indigo-matter
 # On macOS lsof ships ONLY in /usr/sbin — there is no /usr/bin/lsof. Invoking it by
 # bare name makes the port probe depend on whatever PATH the Indigo plugin host
 # inherited, and a PATH without /usr/sbin turns the probe into a silent no-op. That is
@@ -309,7 +311,7 @@ class LaunchAgent:
 
     @property
     def log_dir(self) -> str:
-        return os.path.join(self.home, "Library", "Logs", "indigo-matter")
+        return os.path.join(self.home, "Library", "Logs", fork_identity.LOG_DIRNAME)  # fork
 
     @property
     def resolved_bin_dir(self) -> str:

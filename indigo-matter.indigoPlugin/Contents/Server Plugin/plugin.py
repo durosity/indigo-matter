@@ -27,6 +27,7 @@ names are isolated in ``protocol.py``.
 from __future__ import annotations
 
 import os
+import fork_identity
 import threading
 import time
 from concurrent.futures import TimeoutError as FuturesTimeoutError
@@ -283,7 +284,7 @@ class Plugin(HttpApiMixin, ExportDialogMixin, PairingMenuMixin, MatterServerMenu
         self.runtime = AsyncRuntime(self.logger)
         self.runtime.start()
 
-        if managed:
+        if managed and not fork_identity.EXPORT_ONLY:  # fork: never run a controller
             try:
                 self.server_process = ServerProcess(prefs, self.logger)
                 self.server_process.ensure_installed()
@@ -347,10 +348,15 @@ class Plugin(HttpApiMixin, ExportDialogMixin, PairingMenuMixin, MatterServerMenu
             self.exports, self._indigo_device, self.export_bridge.ct_learner, self.logger)
         self._exports_changed()
 
-        run_future = self.runtime.submit(self.matter.run())
-        # if the run-loop coroutine ever dies, surface it rather than parking the
-        # exception on an unretrieved future.
-        run_future.add_done_callback(self._log_run_future)
+        if fork_identity.EXPORT_ONLY:
+            # fork: export-only. Never dial a matter-server — upstream's would
+            # answer, and every Matter device would be mirrored into Indigo twice.
+            self.logger.info("%s: export-only build — the Matter controller is not started", PLUGIN_NAME)
+        else:
+            run_future = self.runtime.submit(self.matter.run())
+            # if the run-loop coroutine ever dies, surface it rather than parking the
+            # exception on an unretrieved future.
+            run_future.add_done_callback(self._log_run_future)
         # reconcile is driven by on_connect (_resync), so it runs on first connect
         # and again on every reconnect — no separate initial-sync task needed.
         self.logger.info("%s started", PLUGIN_NAME)

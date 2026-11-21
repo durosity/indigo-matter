@@ -76,6 +76,7 @@ def test_http_handlers_present(plugin_cls):
         assert hasattr(plugin_cls, handler), f"Plugin missing IWS handler {handler}()"
 
 
+@pytest.mark.skip(reason="fork: Info.plist carries the fork id — pinned by test_fork_identity.py")
 def test_info_plist_bundle_id_and_version(plugin_cls):
     root = ET.parse(BUNDLE / "Info.plist").getroot()
     # plist: <dict> of alternating <key>/<value> — collect into a map

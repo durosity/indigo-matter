@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleDisplayName</key>
-	<string>Matter Bridges (prototype)</string>
+	<string>Matter Prototype</string>
 	<key>CFBundleIdentifier</key>
 	<string>com.durosity.indigo-matter-bridges</string>
 	<key>CFBundleShortVersionString</key>

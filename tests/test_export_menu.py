@@ -2620,7 +2620,7 @@ def test_the_fleet_recipe_does_not_cross_device_types(plug, devices):
 def test_a_standard_sensor_never_shows_the_mapping_fields(plug, devices):
     values = plug.exportDeviceChanged(_values(exportDevice="103"))
     assert values["exportNeedsMapping"] == "false"
-    assert values["exportStateKey"] == ""
+    assert values["exportStateKey"] == "_auto"  # fork step 4c: Auto, i.e. no mapping
 
 
 def test_a_stale_state_key_is_not_saved_onto_a_non_binary_role(plug, devices):

@@ -1266,7 +1266,7 @@
                  exportDeviceChanged, because visibility can only bind to a
                  field value and "is this device mappable" is not one. -->
             <Field id="exportNeedsMapping" type="textfield" hidden="true" defaultValue="false"/>
-            <Field id="exportStateKey" type="menu"
+            <Field id="exportStateKey" type="menu" defaultValue="_auto"
                    alwaysUseInDialogHeightCalc="true">
                 <Label>Device state:</Label>
                 <List class="self" method="getExportStateKeys" dynamicReload="true"/>

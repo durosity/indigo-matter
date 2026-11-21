@@ -64,7 +64,17 @@ BRIDGE_PACKAGE = "indigo-matter-bridge"
 #: and matter.js patch releases have changed what Apple Home renders with no code
 #: change on the bridge side. **This is the one line a release bumps**, in step
 #: with ``bridge-node/package.json``'s ``version``.
-DEFAULT_INSTALL_SPEC = f"{BRIDGE_PACKAGE}@0.17.5"
+#: Fork: the plugin ships its own build of the node — ``bridge-node/`` packed
+#: by ``tools/build_bridge_node.sh`` into ``bridge_node/`` in this bundle —
+#: because the registry's newest (0.17.5) predates the robot vacuum. npm
+#: installs a tarball path as readily as a ``name@version``. Without the
+#: tarball (a source checkout, the test suite) the registry pin is used.
+BUNDLED_NODE_VERSION = "0.18.0"
+BUNDLED_NODE_TARBALL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bridge_node",
+                                    f"{BRIDGE_PACKAGE}-{BUNDLED_NODE_VERSION}.tgz")
+REGISTRY_INSTALL_SPEC = f"{BRIDGE_PACKAGE}@0.17.5"
+DEFAULT_INSTALL_SPEC = (BUNDLED_NODE_TARBALL if os.path.isfile(BUNDLED_NODE_TARBALL)
+                        else REGISTRY_INSTALL_SPEC)
 
 #: Fallback entry point when the installed package's ``package.json`` is missing
 #: or unreadable. Must match ``bridge-node/package.json``'s ``main``;

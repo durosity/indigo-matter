@@ -1044,7 +1044,7 @@ class ExportDialogMixin:
                 + self._exported_warning(device_id))
             return values
         values["exportNeedsMapping"] = "true" if saved.get(OPTION_STATE_KEY) else "false"
-        values["exportStateKey"] = str(saved.get(OPTION_STATE_KEY, "") or "")
+        values["exportStateKey"] = str(saved.get(OPTION_STATE_KEY, "") or self.AUTO_STATE_KEY)
         values["exportStateInvert"] = bool(saved.get(OPTION_STATE_INVERT, False))
         values["exportCmdOn"] = str(saved.get(export_catalog.OPTION_CMD_ON_AG, "") or self.RVC_AUTOMATIC)
         values["exportCmdOff"] = str(saved.get(export_catalog.OPTION_CMD_OFF_AG, "") or self.RVC_AUTOMATIC)
@@ -1163,7 +1163,7 @@ class ExportDialogMixin:
         values["exportName"] = ""
         values["exportInvert"] = False
         values["exportNeedsMapping"] = "false"
-        values["exportStateKey"] = ""
+        values["exportStateKey"] = "_auto"  # ExportDialogMixin.AUTO_STATE_KEY (a staticmethod here)
         values["exportStateInvert"] = False
         values["exportCtWarmestK"] = ""
         values["exportCtCoolestK"] = ""

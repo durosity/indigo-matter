@@ -78,7 +78,7 @@ def test_the_install_spec_is_a_registry_pin(tmp_path, mock_logger):
     """
     bridge = _bridge(tmp_path, mock_logger)
     assert bridge.spec.install_spec == bridge_agent.DEFAULT_INSTALL_SPEC
-    name, _, version = bridge_agent.DEFAULT_INSTALL_SPEC.partition("@")
+    name, _, version = bridge_agent.REGISTRY_INSTALL_SPEC.partition("@")  # fork: DEFAULT may be the bundled tarball
     assert name == bridge_agent.BRIDGE_PACKAGE
     assert version and not version.startswith(("^", "~")), "must be exact-pinned, not a range"
 
@@ -100,7 +100,7 @@ def test_the_default_entry_matches_the_packages_main(tmp_path, mock_logger):
     # schedule; the plugin adopts a published version when it is ready) but must
     # never be AHEAD of it: a pin newer than the source tree names a version
     # that cannot have been published from here, and every install would 404.
-    pin = tuple(int(p) for p in bridge_agent.DEFAULT_INSTALL_SPEC.partition("@")[2].split("."))
+    pin = tuple(int(p) for p in bridge_agent.REGISTRY_INSTALL_SPEC.partition("@")[2].split("."))
     package = tuple(int(p) for p in manifest["version"].split("."))
     assert pin <= package, "DEFAULT_INSTALL_SPEC must not pin a version ahead of package.json"
     bridge = _bridge(tmp_path, mock_logger)

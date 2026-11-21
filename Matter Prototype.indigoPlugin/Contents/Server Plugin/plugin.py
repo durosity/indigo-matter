@@ -367,6 +367,7 @@ class Plugin(HttpApiMixin, ExportDialogMixin, PairingMenuMixin, MatterServerMenu
             # fork: export-only. Never dial a matter-server — upstream's would
             # answer, and every Matter device would be mirrored into Indigo twice.
             self.logger.info("%s: export-only build — the Matter controller is not started", PLUGIN_NAME)
+            self._retire_controller_agent()  # step 4c
         else:
             run_future = self.runtime.submit(self.matter.run())
             # if the run-loop coroutine ever dies, surface it rather than parking the

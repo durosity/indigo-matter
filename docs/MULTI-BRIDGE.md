@@ -193,6 +193,16 @@ Done (each commit tested in full before landing; suite about 4650 passing):
   per-endpoint tolerance in `bridge-node/src/registry.ts`, which means the fork
   shipping its own node build. Also: the state picker's Auto row has a real id
   (`_auto`), and the matter-server watchdog is quiet in the export-only build.
+- step 4c (`step4c.py`): the fork ships its own bridge node. The registry's
+  newest is 0.17.5, which predates the robot vacuum; `tools/build_bridge_node.sh`
+  runs the repo node's tests (on the Mac: they need a normal user and mDNS),
+  builds it and packs it into `Server Plugin/bridge_node/`, and
+  `bridge_agent.DEFAULT_INSTALL_SPEC` is that tarball when present (else the
+  registry pin, `REGISTRY_INSTALL_SPEC`). "Install/update Matter bridge node"
+  then moves every bridge onto it. Also: Device state defaults to Auto; no
+  `set_state` for a device the bridge skipped or the node refused; the storage
+  move drops the old node's `matter.lock`; the export-only build removes the
+  matter-server LaunchAgent an earlier build left running.
 - Known gaps, by design for now: device bridges ignore the global "Enable Matter export" switch (absent `exportEnabled` reads
   as on); fabric backup/restore and CT calibration act on the legacy bridge
   only; no "on bridge X" exclusion yet, so one device CAN be on two bridges

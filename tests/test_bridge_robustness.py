@@ -38,6 +38,7 @@ def _bridge(eb, prefs):
     bridge._save_prefs = Mock()
     bridge._logger = Mock()
     bridge._pushed = {}
+    bridge._skipped = {}
     return bridge
 
 

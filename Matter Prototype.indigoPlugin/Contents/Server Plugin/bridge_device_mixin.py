@@ -457,6 +457,25 @@ ol {{ text-align:left; padding-left:20px; }} li {{ margin:6px 0; }}
             os.rename(dst, os.path.normpath(dst) + ".discarded")
         os.makedirs(os.path.dirname(os.path.normpath(dst)), exist_ok=True)
         shutil.move(src, dst)
+        # The stopped node's lock file came along: drop it, or the new node
+        # has to clear it as "stale" with a warning on its first start.
+        for folder, _dirs, files in os.walk(dst):
+            if "matter.lock" in files:
+                os.remove(os.path.join(folder, "matter.lock"))
+
+    def _retire_controller_agent(self) -> None:
+        """Export-only build: remove a matter-server LaunchAgent an earlier build left running."""
+        try:
+            from server_process import ServerProcess  # pylint: disable=import-outside-toplevel
+            agent = ServerProcess(dict(self.pluginPrefs), self.logger)
+            if not os.path.exists(agent.plist_path):
+                return
+            agent.uninstall()
+            self.logger.info("Removed the Matter controller (matter-server) that an earlier build left "
+                             "running — this export-only build does not use it. Its storage is kept.")
+        except Exception as exc:  # pylint: disable=broad-except
+            # housekeeping only: never let it stop the plugin starting
+            self.logger.debug("could not check for a leftover matter-server agent (%s)", exc)
 
     def _retire_health_device(self) -> None:
         """Delete the standing Matter Bridge Health device: every bridge device has its states."""

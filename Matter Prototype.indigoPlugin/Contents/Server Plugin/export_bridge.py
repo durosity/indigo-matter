@@ -1278,6 +1278,8 @@ class ExportBridge:
         handler = export_handlers.handler_for_entry(entry)
         if handler is None:
             return                             # already warned by the provider
+        if new_dev.id in self._skipped:
+            return                             # not bridged (warned once already): nothing live to update
         client = self._live_client("the state update", new_dev.id)
         if client is None:
             return
@@ -1566,6 +1568,7 @@ class ExportBridge:
         if was_live or str(getattr(exc, "code", "")) != bridge_protocol.ERR_INTERNAL:
             return
         self._pushed.pop(device_id, None)
+        self._skipped[device_id] = "refused by the bridge node"
         quarantined = self.quarantined()
         quarantined[device_id] = str(getattr(exc, "details", "") or exc)
         self._write_quarantine(quarantined)

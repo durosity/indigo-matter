@@ -3,6 +3,29 @@
 Notable changes per release. Versions are `YYYY.R.P`; the authoritative
 current version is `Info.plist`'s `PluginVersion`.
 
+## 2026.35.1 — Multiple Matter bridges, as Indigo devices (fork: Matter Prototype)
+
+- New device type **Matter Bridge**. Each one is its own Matter bridge — its own
+  pairing code, node process, ports and storage — so different devices can go to
+  different ecosystems, and a problem with one bridge only affects its own devices.
+- HomeKitLink-style editing: a bridge's **Configure** dialog holds the whole export
+  panel (device picker, role, options, vacuum action-group mappings, export list), plus
+  **Open pairing window** and a QR pairing page. Published names default to the Indigo
+  name; a device can be unpublished while keeping its settings.
+- Any device can be exported as any single-value type ("mapped"): the value comes
+  from a chosen or automatic state (optionally inverted) and commands run chosen
+  ON/OFF action groups. Colour lights, thermostats and vacuums are not mappable.
+- Health states (subscription health, fabric names and health) on every bridge device.
+- The built-in bridge migrates into a Matter Bridge device on first start, keeping its
+  ports and pairings (storage backed up as `.pre-device-backup`). The plugin-wide
+  Manage Exports, Pair Bridge, Unpair and Reset menu items move into the device.
+- Accessory names are cut to Matter's 32-byte limit; an accessory the node refuses is
+  quarantined instead of failing every other export.
+- Runs beside upstream: own plugin id, ports (5640/5681 and up), LaunchAgents, storage
+  and logs; export-only (never starts or dials a Matter controller). Ships its own
+  bridge node 0.18.0 build (`tools/build_bridge_node.sh`), since the npm registry's
+  newest node predates the robot vacuum.
+
 ## 2026.35.0 — Export a robot vacuum to Apple Home (its own Matter accessory)
 
 - New: a robot vacuum can be exported as a native Matter **Robotic Vacuum

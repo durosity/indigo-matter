@@ -1,5 +1,23 @@
 # indigo-matter
 
+> **About this fork** ([durosity/indigo-matter](https://github.com/durosity/indigo-matter),
+> from [simons-plugins/indigo-matter](https://github.com/simons-plugins/indigo-matter)).
+> This branch adds, on top of upstream `main`:
+>
+> - **Robot vacuums** exported to Apple Home as native Matter Robotic Vacuum Cleaners —
+>   each on its own Matter node, since Apple Home and Alexa can't drive a bridged vacuum;
+>   optional cleaning modes, rooms and "Play sound". See [docs/VACUUM.md](docs/VACUUM.md)
+>   and [ADR-0019](docs/adr/0019-a-robot-vacuum-is-its-own-matter-node-not-a-bridged-child.md).
+> - **Multiple bridges as Indigo devices**, HomeKitLink-style: each *Matter Bridge*
+>   device is its own Matter bridge, with its own pairing code, and its Configure dialog
+>   picks and configures the devices it exports (including action-group mappings). The
+>   built-in bridge migrates into one automatically. See [docs/MULTI-BRIDGE.md](docs/MULTI-BRIDGE.md).
+>
+> It installs as **Matter Prototype** (`com.durosity.indigo-matter-bridges`), export-only,
+> with its own ports, LaunchAgents and storage, so it runs **alongside** the upstream plugin.
+> All fork-specific identity lives in `Server Plugin/fork_identity.py` — restoring upstream's
+> values there is the first step to merging this back.
+
 Matter device support for the [Indigo](https://www.indigodomo.com) home automation server —
 **in both directions**.
 

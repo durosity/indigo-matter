@@ -3,6 +3,14 @@
 Notable changes per release. Versions are `YYYY.R.P`; the authoritative
 current version is `Info.plist`'s `PluginVersion`.
 
+## 2026.35.1.002 — No false "matter-server is crashing" at first start
+
+- When the plugin has just installed or reloaded matter-server's LaunchAgent (first
+  start after enabling the controller, or a changed plist), Node needs several seconds
+  to listen. The first missed connects are now treated as the expected startup outage
+  (the same window a menu restart opens) instead of "appears to be crashing" with
+  stale log lines; a server that never comes up is still reported after the window.
+
 ## 2026.35.1.001 — Matter Bridge: complete in both directions
 
 - The plugin is now named **Matter Bridge** (the bundle folder stays

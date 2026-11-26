@@ -298,7 +298,16 @@ class Plugin(HttpApiMixin, ExportDialogMixin, PairingMenuMixin, MatterServerMenu
         if managed and not fork_identity.EXPORT_ONLY:  # fork: never run a controller
             try:
                 self.server_process = ServerProcess(prefs, self.logger)
-                self.server_process.ensure_installed()
+                if self.server_process.ensure_installed() is True:
+                    # launchd has only just (re)loaded matter-server — first start
+                    # after install, or a changed plist — and Node takes several
+                    # seconds to listen. Without this window the client's first
+                    # misses were reported as "appears to be crashing", quoting
+                    # days-old benign lines from the err log, seconds before it
+                    # connected. Same window a menu restart opens; cleared on the
+                    # first successful connect, and a server that never comes up
+                    # is still reported once the window has passed.
+                    self._expect_restart()
             except Exception as exc:  # pylint: disable=broad-except
                 # Absorbing: anything ServerProcess's constructor or ensure_installed()
                 # raises. Safe because the matter-server agent is optional and gated off by

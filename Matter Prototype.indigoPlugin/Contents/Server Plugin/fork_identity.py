@@ -15,9 +15,12 @@ mechanism it feeds:
   both distinct it can never touch upstream's processes.
 * ``MATTER_PORT`` / ``WS_PORT`` — upstream uses 5540 / 5581 (+5541… for its
   standalone vacuums); 5640 / 5681 keep well clear.
-* ``EXPORT_ONLY`` — never run or dial a Matter *controller*: upstream's
-  matter-server already does that, and dialling it would mirror every Matter
-  device into Indigo a second time.
+* ``EXPORT_ONLY`` — never run or dial a Matter *controller*. ``False`` since
+  2026.35.1.001: upstream is retired on this Mac, so this plugin is the
+  controller too, with its own LaunchAgent and its own fabric under
+  ``CONTROLLER_LABEL`` (it never shares upstream's). Set it back to ``True``
+  only if upstream's controller is running here again — two controllers would
+  both want port 5580 and every Matter device would be mirrored twice.
 * ``FOREIGN_MATTER_PLUGIN_IDS`` — devices those plugins create came FROM
   Matter; exporting them back out is the loop the guard exists for.
 """
@@ -39,7 +42,7 @@ PROJECT_DIRNAME = "indigo-matter-bridges"
 LOG_DIRNAME = "indigo-matter-bridges"
 MATTER_PORT = "5640"
 WS_PORT = "5681"
-EXPORT_ONLY = True
+EXPORT_ONLY = False
 FOREIGN_MATTER_PLUGIN_IDS = frozenset({"com.simons-plugins.indigo-matter"})
 
 if UPSTREAM_IDENTITY:  # tests only — see above

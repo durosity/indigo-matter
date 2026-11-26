@@ -45,13 +45,13 @@ def test_nothing_the_fork_owns_collides_with_upstream():
     assert v["storage"].endswith("/com.durosity.indigo-matter-bridges/bridge-node")
 
 
-def test_the_fork_is_export_only_and_never_reexports_upstreams_matter_devices():
+def test_the_controller_is_enabled_and_upstreams_matter_devices_are_never_reexported():
     v = _fork_values()
-    assert v["export_only"] is True
+    assert v["export_only"] is False
     assert v["foreign"] == ["com.simons-plugins.indigo-matter"]
 
 
 def test_info_plist_carries_the_fork_identity():
     info = plistlib.loads((PLUGIN / "Info.plist").read_bytes())
     assert info["CFBundleIdentifier"] == "com.durosity.indigo-matter-bridges"
-    assert "prototype" in info["CFBundleDisplayName"].lower()
+    assert info["CFBundleDisplayName"] == "Matter Bridge"

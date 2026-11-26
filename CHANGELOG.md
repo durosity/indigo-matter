@@ -3,6 +3,22 @@
 Notable changes per release. Versions are `YYYY.R.P`; the authoritative
 current version is `Info.plist`'s `PluginVersion`.
 
+## 2026.35.1.001 — Matter Bridge: complete in both directions
+
+- The plugin is now named **Matter Bridge** (the bundle folder stays
+  `Matter Prototype.indigoPlugin`, and the plugin id is unchanged, so it updates in
+  place).
+- The **Matter controller is back on**: Matter devices can be imported into Indigo
+  (Commission device by setup code…, Share a Matter device with another ecosystem…,
+  Decommission…). It runs its own matter-server LaunchAgent with its **own fabric**
+  under `~/Library/Application Support/com.durosity.indigo-matter-bridges/` — it never
+  touches the upstream plugin's. Do not run the upstream plugin's controller on the
+  same Mac (both use port 5580). Devices this plugin imports are never re-exported
+  (the loop guard), as upstream.
+- Merged upstream 2026.34.1: stopping the bridge node on purpose is a latched outage,
+  not a failure; launchd bootouts are re-checked before warning; `indigo.Dict` has no
+  `pop`.
+
 ## 2026.35.1 — Multiple Matter bridges, as Indigo devices (fork: Matter Prototype)
 
 - New device type **Matter Bridge**. Each one is its own Matter bridge — its own

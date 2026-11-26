@@ -13,8 +13,11 @@
 >   picks and configures the devices it exports (including action-group mappings). The
 >   built-in bridge migrates into one automatically. See [docs/MULTI-BRIDGE.md](docs/MULTI-BRIDGE.md).
 >
-> It installs as **Matter Prototype** (`com.durosity.indigo-matter-bridges`), export-only,
-> with its own ports, LaunchAgents and storage, so it runs **alongside** the upstream plugin.
+> It installs as **Matter Bridge** (`com.durosity.indigo-matter-bridges`, bundle folder
+> `Matter Prototype.indigoPlugin`) and is complete in **both directions** — the Matter
+> controller (importing Matter devices) as well as export — with its own ports,
+> LaunchAgents, storage and Matter fabric, separate from the upstream plugin's.
+> It also carries upstream's fixes up to 2026.34.1.
 > All fork-specific identity lives in `Server Plugin/fork_identity.py` — restoring upstream's
 > values there is the first step to merging this back.
 
